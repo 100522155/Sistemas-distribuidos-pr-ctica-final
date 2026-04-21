@@ -53,24 +53,22 @@ task_t dequeue() {
 
 
 
-
-
 int main() {
     int server_socket, client_socket;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
+    struct sockaddr_in server_addr, client_addr; //struct de tres clases: Familia (IPv4), IP y Puerto.
+    socklen_t client_addr_len = sizeof(client_addr); // Variable para almacenar el tamaño de la dirección del cliente
 
     // Creamos el socket del servidor
-    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) { // AF_INET: IPv4, SOCK_STREAM: TCP
         perror("socket");
         exit(EXIT_FAILURE);
     }
 
     // Configuramos la dirección del servidor
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
+    memset(&server_addr, 0, sizeof(server_addr)); // Limpiamos la estructura de la dirección del servidor
+    server_addr.sin_family = AF_INET; // Familia de direcciones (IPv4)
+    server_addr.sin_addr.s_addr = INADDR_ANY; // Aceptamos conexiones en cualquier interfaz de red
+    server_addr.sin_port = htons(PORT); // Convertimos el número de puerto a formato de red
 
     // Enlazamos el socket a la dirección del servidor
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
