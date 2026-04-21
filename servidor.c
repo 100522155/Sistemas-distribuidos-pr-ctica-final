@@ -11,6 +11,7 @@
 
 #define PORT 5000 //Puerto a utilizar
 #define BUFFER_SIZE 1024 //tamaño del buffer para recibir datos
+#define NUM_THREADS 8 //Número de hilos trabajadores
 
 typedef struct { // guarda el descriptor del socket del cliente
     int socket;
@@ -50,14 +51,26 @@ task_t dequeue() {
     return task; // Devolvemos la tarea de la cola
 }
 
-
+void *thread_function(void *arg) {
+    while (1) {
+        task_t task = dequeue(); // El hilo se bloquea aquí si la cola está vacía
+        
+        printf("[Hilo %ld] Atendiendo al socket %d\n", pthread_self(), task.socket);
+        
+        // AQUÍ es donde leerás el código de operación (REGISTER, CONNECT, etc.)
+        // Por ahora, solo cerramos el socket para probar
+        close(task.socket); 
+    }
+    return NULL;
+}
 
 
 int main() {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr; //struct de tres clases: Familia (IPv4), IP y Puerto.
     socklen_t client_addr_len = sizeof(client_addr); // Variable para almacenar el tamaño de la dirección del cliente
-
+    pthread_t threads[NUM_THREADS];
+    
     // Creamos el socket del servidor
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) { // AF_INET: IPv4, SOCK_STREAM: TCP
         perror("socket");
@@ -86,14 +99,22 @@ int main() {
 
     printf("Servidor escuchando en el puerto %d...\n", PORT);
 
+    for (int i = 0; i < NUM_THREADS; i++) {
+        if (pthread_create(&threads[i], NULL, thread_function, NULL) != 0) {
+            perror("pthread_create");
+            close(server_socket);
+            exit(EXIT_FAILURE);
+        }
+    }
+
     while (1) {
         // Aceptamos una conexión entrante
-        if ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
+        if ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) { 
             perror("accept");
             continue; // Si hay un error al aceptar, seguimos esperando nuevas conexiones
         }
         printf("Cliente conectado: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
+        
         // Añadimos la nueva conexión a la cola de tareas para que los hilos trabajadores la atiendan
         enqueue(client_socket);
     }
