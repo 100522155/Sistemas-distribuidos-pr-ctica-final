@@ -1,220 +1,180 @@
 from enum import Enum
 import argparse
+import socket
+import struct
 
-class client :
+class client:
 
-    # ******************** TYPES *********************
-    # *
-    # * @brief Return codes for the protocol methods
-    class RC(Enum) :
-        OK = 0
-        ERROR = 1
+    class RC(Enum):
+        OK         = 0
+        ERROR      = 1
         USER_ERROR = 2
 
-    # ****************** ATTRIBUTES ******************
     _server = None
-    _port = -1
+    _port   = -1
+    _socket = None
 
-    # ******************** METHODS *******************
-    # *
-    # * @param user - User name to register in the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user is already registered
-    # * @return ERROR if another error occurred
     @staticmethod
-    def  register(user) :
-        #  Write your code here
+    def register(user):
+        try:
+            client._socket.send(struct.pack('B', 0))
+            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            res = struct.unpack('B', client._socket.recv(1))[0]
+            if   res == 0: print("REGISTER OK")
+            elif res == 1: print("REGISTER: usuario ya existe")
+            else:          print(f"REGISTER ERROR ({res})")
+            return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+        except Exception as e:
+            print(f"Error en REGISTER: {e}")
+            return client.RC.ERROR
+
+    @staticmethod
+    def unregister(user):
+        try:
+            client._socket.send(struct.pack('B', 1))
+            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            res = struct.unpack('B', client._socket.recv(1))[0]
+            if   res == 0: print("UNREGISTER OK")
+            elif res == 1: print("UNREGISTER: usuario no existe")
+            else:          print(f"UNREGISTER ERROR ({res})")
+            return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+        except Exception as e:
+            print(f"Error en UNREGISTER: {e}")
+            return client.RC.ERROR
+
+    @staticmethod
+    def connect(user):
+        try:
+            client._socket.send(struct.pack('B', 2))
+            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            client._socket.send(struct.pack('!I', 6000))  # puerto de escucha del cliente
+            res = struct.unpack('B', client._socket.recv(1))[0]
+            if   res == 0: print("CONNECT OK")
+            elif res == 1: print("CONNECT: usuario no registrado")
+            else:          print(f"CONNECT ERROR ({res})")
+            return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+        except Exception as e:
+            print(f"Error en CONNECT: {e}")
+            return client.RC.ERROR
+
+    @staticmethod
+    def disconnect(user):
+        try:
+            client._socket.send(struct.pack('B', 3))
+            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            client._socket.send(struct.pack('!I', 0))
+            res = struct.unpack('B', client._socket.recv(1))[0]
+            if   res == 0: print("DISCONNECT OK")
+            elif res == 1: print("DISCONNECT: usuario no registrado")
+            else:          print(f"DISCONNECT ERROR ({res})")
+            return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+        except Exception as e:
+            print(f"Error en DISCONNECT: {e}")
+            return client.RC.ERROR
+
+    @staticmethod
+    def users():
+        # TODO
+        print("USERS: no implementado aún")
         return client.RC.ERROR
 
-    # *
-    # 	 * @param user - User name to unregister from the system
-    # 	 * 
-    # 	 * @return OK if successful
-    # 	 * @return USER_ERROR if the user does not exist
-    # 	 * @return ERROR if another error occurred
     @staticmethod
-    def  unregister(user) :
-        #  Write your code here
+    def send(user, message):
+        # TODO
         return client.RC.ERROR
 
-
-    # *
-    # * @param user - User name to connect to the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist or if it is already connected
-    # * @return ERROR if another error occurred
     @staticmethod
-    def  connect(user) :
-        #  Write your code here
+    def sendAttach(user, file, message):
+        # TODO
         return client.RC.ERROR
 
-    # *
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist or if it is already connected
-    # * @return ERROR if another error occurred
-    @staticmethod
-    def  users() :
-        #  Write your code here
-        return client.RC.ERROR
-
-
-
-    # *
-    # * @param user - User name to disconnect from the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist
-    # * @return ERROR if another error occurred
-    @staticmethod
-    def  disconnect(user) :
-        #  Write your code here
-        return client.RC.ERROR
-
-    # *
-    # * @param user    - Receiver user name
-    # * @param message - Message to be sent
-    # * 
-    # * @return OK if the server had successfully delivered the message
-    # * @return USER_ERROR if the user is not connected (the message is queued for delivery)
-    # * @return ERROR the user does not exist or another error occurred
-    @staticmethod
-    def  send(user,  message) :
-        #  Write your code here
-        return client.RC.ERROR
-
-    # *
-    # * @param user    - Receiver user name
-    # * @param file    - file  to be sent
-    # * @param message - Message to be sent
-    # * 
-    # * @return OK if the server had successfully delivered the message
-    # * @return USER_ERROR if the user is not connected (the message is queued for delivery)
-    # * @return ERROR the user does not exist or another error occurred
-    @staticmethod
-    def  sendAttach(user,  file,  message) :
-        #  Write your code here
-        return client.RC.ERROR
-
-    # *
-    # **
-    # * @brief Command interpreter for the client. It calls the protocol functions.
     @staticmethod
     def shell():
-
-        while (True) :
-            try :
+        while True:
+            try:
                 command = input("c> ")
                 line = command.split(" ")
-                if (len(line) > 0):
+                if not line:
+                    continue
+                line[0] = line[0].upper()
 
-                    line[0] = line[0].upper()
+                if line[0] == "REGISTER":
+                    if len(line) == 2: client.register(line[1])
+                    else: print("Uso: REGISTER <usuario>")
 
-                    if (line[0]=="REGISTER") :
-                        if (len(line) == 2) :
-                            client.register(line[1])
-                        else :
-                            print("Syntax error. Usage: REGISTER <userName>")
+                elif line[0] == "UNREGISTER":
+                    if len(line) == 2: client.unregister(line[1])
+                    else: print("Uso: UNREGISTER <usuario>")
 
-                    elif(line[0]=="UNREGISTER") :
-                        if (len(line) == 2) :
-                            client.unregister(line[1])
-                        else :
-                            print("Syntax error. Usage: UNREGISTER <userName>")
+                elif line[0] == "CONNECT":
+                    if len(line) == 2: client.connect(line[1])
+                    else: print("Uso: CONNECT <usuario>")
 
-                    elif(line[0]=="CONNECT") :
-                        if (len(line) == 2) :
-                            client.connect(line[1])
-                        else :
-                            print("Syntax error. Usage: CONNECT <userName>")
+                elif line[0] == "DISCONNECT":
+                    if len(line) == 2: client.disconnect(line[1])
+                    else: print("Uso: DISCONNECT <usuario>")
 
-                    elif(line[0]=="DISCONNECT") :
-                        if (len(line) == 2) :
-                            client.disconnect(line[1])
-                        else :
-                            print("Syntax error. Usage: DISCONNECT <userName>")
+                elif line[0] == "USERS":
+                    if len(line) == 1: client.users()
+                    else: print("Uso: USERS")
 
-                    elif(line[0]=="USERS") :
-                        if (len(line) == 1) :
-                            client.users()
-                        else :
-                            print("Syntax error. Usage: CONNECTED_USERS <userName>")
+                elif line[0] == "SEND":
+                    if len(line) >= 3:
+                        client.send(line[1], ' '.join(line[2:]))
+                    else: print("Uso: SEND <usuario> <mensaje>")
 
-                    elif(line[0]=="SEND") :
-                        if (len(line) >= 3) :
-                            #  Remove first two words
-                            message = ' '.join(line[2:])
-                            client.send(line[1], message)
-                        else :
-                            print("Syntax error. Usage: SEND <userName> <message>")
+                elif line[0] == "SENDATTACH":
+                    if len(line) >= 4:
+                        client.sendAttach(line[1], line[2], ' '.join(line[3:]))
+                    else: print("Uso: SENDATTACH <usuario> <fichero> <mensaje>")
 
-                    elif(line[0]=="SENDATTACH") :
-                        if (len(line) >= 4) :
-                            #  Remove first two words
-                            message = ' '.join(line[3:])
-                            client.sendAttach(line[1], line[2], message)
-                        else :
-                            print("Syntax error. Usage: SENDATTACH <userName> <filename> <message>")
+                elif line[0] == "QUIT":
+                    if len(line) == 1: break
+                    else: print("Uso: QUIT")
 
-                    elif(line[0]=="QUIT") :
-                        if (len(line) == 1) :
-                            break
-                        else :
-                            print("Syntax error. Use: QUIT")
-                    else :
-                        print("Error: command " + line[0] + " not valid.")
+                else:
+                    print(f"Comando desconocido: {line[0]}")
+
             except Exception as e:
-                print("Exception: " + str(e))
+                print(f"Excepción: {e}")
 
-    # *
-    # * @brief Prints program usage
     @staticmethod
-    def usage() :
-        print("Usage: python3 client.py -s <server> -p <port>")
+    def usage():
+        print("Uso: python3 client.py -s <servidor> -p <puerto>")
 
-
-    # *
-    # * @brief Parses program execution arguments
     @staticmethod
-    def  parseArguments(argv) :
+    def parseArguments(argv):
         parser = argparse.ArgumentParser()
-        parser.add_argument('-s', type=str, required=True, help='Server IP')
-        parser.add_argument('-p', type=int, required=True, help='Server Port')
+        parser.add_argument('-s', type=str, required=True, help='IP del servidor')
+        parser.add_argument('-p', type=int, required=True, help='Puerto del servidor')
         args = parser.parse_args()
 
-        if (args.s is None):
-            parser.error("Usage: python3 client.py -s <server> -p <port>")
+        if not (1024 <= args.p <= 65535):
+            parser.error("El puerto debe estar entre 1024 y 65535")
             return False
 
-        if ((args.p < 1024) or (args.p > 65535)):
-            parser.error("Error: Port must be in the range 1024 <= port <= 65535");
-            return False;
-        
-        _server = args.s
-        _port = args.p
-
+        client._server = args.s
+        client._port   = args.p
         return True
 
-
-    # ******************** MAIN *********************
     @staticmethod
-    def main(argv) :
-        if (not client.parseArguments(argv)) :
+    def main(argv):
+        if not client.parseArguments(argv):
             client.usage()
             return
 
         try:
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
+            print(f"Conectado a {client._server}:{client._port}")
         except Exception as e:
             print(f"Error conectando al servidor: {e}")
             return
-        
-        client.shell()
-        print("+++ FINISHED +++")
-    
 
-if __name__=="__main__":
+        client.shell()
+        client._socket.close()
+        print("+++ FINISHED +++")
+
+
+if __name__ == "__main__":
     client.main([])

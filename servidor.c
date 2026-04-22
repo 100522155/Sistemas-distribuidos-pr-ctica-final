@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <sys/sendfile.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
+#include "claves.h"
 
 #define PORT 5000 //Puerto a utilizar
 #define BUFFER_SIZE 1024 //tamaño del buffer para recibir datos
@@ -27,6 +29,15 @@ int rear = -1; //Es donde el main "escribe" (añade) la nueva conexión.
 
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para proteger el acceso a la cola de tareas
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; // Condición para notificar a los hilos trabajadores de que hay tareas disponibles
+
+void handle_register(int socket, char *client_ip);
+void handle_unregister(int socket, char *client_ip);
+void handle_connect(int socket, char *client_ip);
+void handle_disconnect(int socket, char *client_ip);
+void handle_users(int socket, char *client_ip);
+void handle_send(int socket);
+void handle_sendattach(int socket);
+void handle_quit(int socket);
 
 // Función para añadir tareas a la cola
 void enqueue(task_t new_task) {
@@ -65,8 +76,14 @@ void *thread_function(void *arg) {
             uint8_t op_code;
             ssize_t bytes = read(client_socket, &op_code, sizeof(op_code));
             
-            if (bytes > 0) {
-                switch (op_code) {
+            if (bytes <= 0) {
+                // El cliente cerró la conexión inesperadamente
+                printf("[Hilo %ld] Cliente %s desconectado (EOF/error).\n",
+                       pthread_self(), task.ip);
+                exit_loop = 1;
+                break;
+            }
+            switch (op_code) {
 
             case 0: //REGISTER
                 handle_register(client_socket,task.ip);
@@ -106,12 +123,9 @@ void *thread_function(void *arg) {
                 break;
             }
         }
-    }
-        printf("[Hilo %ld] Atendiendo al socket %d\n", pthread_self(), client_socket);
-        
-        // AQUÍ es donde leerás el código de operación (REGISTER, CONNECT, etc.)
-        // Por ahora, solo cerramos el socket para probar
-        close(client_socket); 
+
+        close(client_socket);
+        printf("[Hilo %ld] Socket %d cerrado.\n", pthread_self(), client_socket);
     }
     return NULL;
 }
@@ -128,6 +142,9 @@ int main() {
         perror("socket");
         exit(EXIT_FAILURE);
     }
+
+    int opt = 1;
+    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     // Configuramos la dirección del servidor
     memset(&server_addr, 0, sizeof(server_addr)); // Limpiamos la estructura de la dirección del servidor
