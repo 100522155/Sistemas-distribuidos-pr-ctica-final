@@ -205,7 +205,13 @@ class client :
             client.usage()
             return
 
-        #  Write code here
+        try:
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+        except Exception as e:
+            print(f"Error conectando al servidor: {e}")
+            return
+        
         client.shell()
         print("+++ FINISHED +++")
     

@@ -1,22 +1,135 @@
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
 #include "claves.h"
+#define PORT 5000 //Puerto a utilizar
 
 // Tenemos que almacenar tuplas con la forma <key-value1-value2-value3>, 
 // y lo haremos con listas enlazadas, donde nuestro Nodo sera:
-struct Nodo {
-    char username[256];
-    int conectado;       // 0: desconectado, 1: conectado
-    char ip[16];         // IP donde escucha el cliente
-    int puerto;          // Puerto donde escucha el cliente
-    // (Para más adelante: aquí iría la lista de mensajes pendientes)
-    struct Nodo *siguiente;
-};
+#define MAX_NAME 256
 
+typedef struct User {
+    char name[MAX_NAME];
+    char ip[16];        // IP del cliente (ej. "192.168.1.10")
+    int port;           // Puerto donde el cliente escucha mensajes
+    int status;         // 0: OFF, 1: CONNECTED
+    struct User *next;  // Lista enlazada
+} User;
+
+User *user_list = NULL;       // Cabecera de la lista de usuarios
 //Declaramos un mutex para proteger las secciones críticas de las funciones
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+void handle_register(int socket, char *client_ip) {
+    char name[MAX_NAME];
+    // Supongamos que el cliente envía el nombre como un string
+    if (read(socket, name, MAX_NAME) <= 0) return;
+
+    int result = 0; // 0 = OK, 1 = Usuario existe, 2 = Error
+
+    pthread_mutex_lock(&mutex);
+    // Lógica de búsqueda y registro (similar a tu claves.c anterior)
+    // ... buscar en la lista ...
+    // ... si no está, malloc y añadir ...
+    pthread_mutex_unlock(&mutex);
+
+    // Responder al cliente (según el protocolo de la práctica)
+    uint8_t response = (uint8_t)result;
+    write(socket, &response, sizeof(uint8_t));
+}
+
+void handle_connect(int socket, char *client_ip) {
+    char name[MAX_NAME];
+    int client_port;
+
+    // 1. Leer los datos que envía el cliente (Nombre y Puerto)
+    if (read(socket, name, MAX_NAME) <= 0) return;
+    if (read(socket, &client_port, sizeof(int)) <= 0) return;
+    client_port = ntohl(client_port); // Convertir de red a formato local
+
+    // 2. BLOQUEAR la lista para actualizar el estado de forma segura
+    pthread_mutex_lock(&mutex);
+    int result = 0; // 0 = OK, 1 = Usuario existe, 2 = Error
+
+    User *curr = user_list;
+    while (curr != NULL && strcmp(curr->name, name) != 0) {
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        result = -1; // Usuario no registrado
+    } else if (curr->status == 1) {
+        result = 0; // Usuario ya conectado
+    } else {
+        // Actualizar el estado del usuario a CONNECTED y guardar IP y puerto
+        curr->status = 1;
+        strncpy(curr->ip, client_ip, 15);
+        curr->ip[15] = '\0'; // Asegurar fin de cadena
+        curr->port = client_port;
+        result = 0; // Conexión exitosa
+    }
+
+    pthread_mutex_unlock(&mutex);
+
+    // Responder al cliente (según el protocolo de la práctica)
+    uint8_t response = (uint8_t)result;
+    write(socket, &response, sizeof(uint8_t));
+}
+
+void handle_disconnect(int socket, char *client_ip) {
+    char name[MAX_NAME];
+    int client_port;
+
+    // 1. Leer los datos que envía el cliente (Nombre y Puerto)
+    if (read(socket, name, MAX_NAME) <= 0) return;
+    if (read(socket, &client_port, sizeof(int)) <= 0) return;
+    client_port = ntohl(client_port); // Convertir de red a formato local
+
+    // 2. BLOQUEAR la lista para actualizar el estado de forma segura
+    pthread_mutex_lock(&mutex);
+    int result = 0; // 0 = OK, 1 = Usuario existe, 2 = Error
+
+    User *curr = user_list;
+    while (curr != NULL && strcmp(curr->name, name) != 0) {
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        result = -1; // Usuario no registrado
+    } else if (curr->status == 0) {
+        result = 0; // Usuario ya desconectado
+    } else {
+        // Actualizar el estado del usuario a CONNECTED y guardar IP y puerto
+        curr->status = 0;
+        strncpy(curr->ip, client_ip, 15);
+        curr->ip[15] = '\0'; // Asegurar fin de cadena
+        curr->port = client_port;
+        result = 0; // Conexión exitosa
+    }
+
+    pthread_mutex_unlock(&mutex);
+
+    // Responder al cliente (según el protocolo de la práctica)
+    uint8_t response = (uint8_t)result;
+    write(socket, &response, sizeof(uint8_t));
+}
+
+
+
+
+
+
+
+
+
+
+
 
 int destroy(void){
     pthread_mutex_lock(&mutex);

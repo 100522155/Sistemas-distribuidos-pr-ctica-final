@@ -13,8 +13,10 @@
 #define BUFFER_SIZE 1024 //tamaño del buffer para recibir datos
 #define NUM_THREADS 8 //Número de hilos trabajadores
 
+
 typedef struct { // guarda el descriptor del socket del cliente
     int socket;
+    char ip[16]; // IP del cliente 
 } task_t;
 
 task_t task_queue[256]; // Cola de tareas para clientes
@@ -27,11 +29,11 @@ pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para proteger 
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; // Condición para notificar a los hilos trabajadores de que hay tareas disponibles
 
 // Función para añadir tareas a la cola
-void enqueue(int client_socket) {
+void enqueue(task_t new_task) {
     pthread_mutex_lock(&queue_mutex); // Bloqueamos el mutex para modificar la cola de tareas
     if (queue_size < queue_capacity) { 
         rear = (rear + 1) % queue_capacity; // Incrementamos rear de forma circular
-        task_queue[rear].socket = client_socket; // Añadimos el nuevo cliente a la cola
+        task_queue[rear] = new_task; // Añadimos el nuevo cliente a la cola
         queue_size++; // Incrementamos el contador de tareas
         pthread_cond_signal(&queue_cond);
     }
@@ -53,13 +55,63 @@ task_t dequeue() {
 
 void *thread_function(void *arg) {
     while (1) {
-        task_t task = dequeue(); // El hilo se bloquea aquí si la cola está vacía
-        
-        printf("[Hilo %ld] Atendiendo al socket %d\n", pthread_self(), task.socket);
+        task_t task = dequeue(); 
+        int client_socket = task.socket;
+        char client_ip[16];
+        strcpy(client_ip, task.ip);
+
+        int exit_loop = 0;
+        while (!exit_loop) {
+            uint8_t op_code;
+            ssize_t bytes = read(client_socket, &op_code, sizeof(op_code));
+            
+            if (bytes > 0) {
+                switch (op_code) {
+
+            case 0: //REGISTER
+                handle_register(client_socket,task.ip);
+                /* code */
+                break;
+            case 1: //UNREGISTER
+                handle_unregister(client_socket,task.ip);
+                /* code */
+                break;
+            case 2: //CONNECT
+                handle_connect(client_socket,task.ip);
+                //Si devuelve 0, el cliente se ha conectado correctamente. Si devuelve -1, el cliente no estaba registrado. 
+                break;
+            case 3: //DISCONNECT
+                handle_disconnect(client_socket,task.ip);
+                exit_loop = 1;
+                break;
+            case 4: //USERS
+                handle_users(client_socket,task.ip);
+                /* code */
+                break;
+            case 5: //SEND
+                handle_send(client_socket);
+                /* code */
+                break;
+            case 6: //SENDATTACH
+                handle_sendattach(client_socket);
+                /* code */
+                break;
+            case 7: //QUIT
+                handle_quit(client_socket);
+                exit_loop = 1;
+                /* code */
+                break;
+
+            default: //ERROR
+                break;
+            }
+        }
+    }
+        printf("[Hilo %ld] Atendiendo al socket %d\n", pthread_self(), client_socket);
         
         // AQUÍ es donde leerás el código de operación (REGISTER, CONNECT, etc.)
         // Por ahora, solo cerramos el socket para probar
-        close(task.socket); 
+        close(client_socket); 
     }
     return NULL;
 }
@@ -113,10 +165,15 @@ int main() {
             perror("accept");
             continue; // Si hay un error al aceptar, seguimos esperando nuevas conexiones
         }
+        task_t new_task;
+        new_task.socket = client_socket;
+
+        strcpy(new_task.ip, inet_ntoa(client_addr.sin_addr));
+
         printf("Cliente conectado: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         
         // Añadimos la nueva conexión a la cola de tareas para que los hilos trabajadores la atiendan
-        enqueue(client_socket);
+        enqueue(new_task);
     }
 
     close(server_socket); // Cerramos el socket del servidor (aunque nunca llegaremos aquí)
