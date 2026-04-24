@@ -30,7 +30,7 @@ int rear = -1; //Es donde el main "escribe" (añade) la nueva conexión.
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para proteger el acceso a la cola de tareas
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; // Condición para notificar a los hilos trabajadores de que hay tareas disponibles
 
-void handle_register(int socket, char *client_ip);
+void handle_register(int socket);
 void handle_unregister(int socket, char *client_ip);
 void handle_connect(int socket, char *client_ip);
 void handle_disconnect(int socket, char *client_ip);
@@ -86,7 +86,7 @@ void *thread_function(void *arg) {
             switch (op_code) {
 
             case 0: //REGISTER
-                handle_register(client_socket,task.ip);
+                handle_register(client_socket);
                 /* code */
                 break;
             case 1: //UNREGISTER
@@ -99,7 +99,7 @@ void *thread_function(void *arg) {
                 break;
             case 3: //DISCONNECT
                 handle_disconnect(client_socket,task.ip);
-                exit_loop = 1;
+
                 break;
             case 4: //USERS
                 handle_users(client_socket,task.ip);

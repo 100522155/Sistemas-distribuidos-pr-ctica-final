@@ -21,8 +21,8 @@ class client:
             client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("REGISTER OK")
-            elif res == 1: print("REGISTER: usuario ya existe")
-            else:          print(f"REGISTER ERROR ({res})")
+            elif res == 1: print("REGISTER IN USE")
+            else:          print(f"REGISTER FAIL")
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en REGISTER: {e}")
@@ -35,8 +35,8 @@ class client:
             client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("UNREGISTER OK")
-            elif res == 1: print("UNREGISTER: usuario no existe")
-            else:          print(f"UNREGISTER ERROR ({res})")
+            elif res == 1: print("USER DOES NOT EXIST")
+            else:          print(f"UNREGISTER FAIL ({res})")
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en UNREGISTER: {e}")
@@ -50,8 +50,9 @@ class client:
             client._socket.send(struct.pack('!I', 6000))  # puerto de escucha del cliente
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("CONNECT OK")
-            elif res == 1: print("CONNECT: usuario no registrado")
-            else:          print(f"CONNECT ERROR ({res})")
+            elif res == 1: print("EL USUARIO NO EXISTE")
+            elif res == 2: print("EL USUARIO YA ESTÁ CONECTADO")
+            else:          print(f"CONNECT FAIL ({res})")
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en CONNECT: {e}")

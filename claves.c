@@ -22,7 +22,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 
-void handle_register(int socket, char *client_ip) {
+void handle_register(int socket) {
     char name[MAX_NAME];
     if (read(socket, name, MAX_NAME) <= 0) return;
     name[MAX_NAME - 1] = '\0'; // seguridad
@@ -34,7 +34,7 @@ void handle_register(int socket, char *client_ip) {
     while (curr != NULL) {
         if (strcmp(curr->name, name) == 0) {
             pthread_mutex_unlock(&mutex);
-            response = 1; // usuario ya existe → USER_ERROR
+            response = 1; // usuario ya existe
             write(socket, &response, sizeof(uint8_t));
             return;
         }
@@ -45,7 +45,7 @@ void handle_register(int socket, char *client_ip) {
     User *new_user = (User *)malloc(sizeof(User));
     if (new_user == NULL) {
         pthread_mutex_unlock(&mutex);
-        response = 2; // error de memoria → ERROR
+        response = 2; // error de memoria
         write(socket, &response, sizeof(uint8_t));
         return;
     }
@@ -101,20 +101,20 @@ void handle_connect(int socket, char *client_ip) {
     char name[MAX_NAME];
     int client_port;
 
-    // 1. Leer los datos que envía el cliente (Nombre y Puerto)
+    // Leer los datos que envía el cliente (Nombre y Puerto)
     if (read(socket, name, MAX_NAME) <= 0) return;
     if (read(socket, &client_port, sizeof(int)) <= 0) return;
     client_port = ntohl(client_port); // Convertir de red a formato local
 
     uint8_t response;
-    // 2. BLOQUEAR la lista para actualizar el estado de forma segura
+    // BLOQUEAR la lista para actualizar el estado de forma segura
     pthread_mutex_lock(&mutex);
 
     User *curr = user_list;
     while (curr != NULL && strcmp(curr->name, name) != 0) {
         curr = curr->next;
-
     }
+    
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1; // no registrado → USER_ERROR
@@ -123,7 +123,7 @@ void handle_connect(int socket, char *client_ip) {
     }
     if (curr->status == 1) {
         pthread_mutex_unlock(&mutex);
-        response = 2; // ya conectado → ERROR
+        response = 2; // ya conectado
         write(socket, &response, sizeof(uint8_t));
         return;
     }
@@ -133,6 +133,7 @@ void handle_connect(int socket, char *client_ip) {
     curr->port = client_port;
 
     pthread_mutex_unlock(&mutex);
+    response = 0; 
 
     // Responder al cliente (según el protocolo de la práctica)
     write(socket, &response, sizeof(uint8_t));
@@ -144,7 +145,7 @@ void handle_disconnect(int socket, char *client_ip) {
     int client_port;
 
     // 1. Leer los datos que envía el cliente (Nombre y Puerto)
-    if (read(socket, name, MAX_NAME) <= 0) return;
+    if (read(socket, name, MAX_NAME )<= 0) return;
     if (read(socket, &client_port, sizeof(int)) <= 0) return;
     client_port = ntohl(client_port); // Convertir de red a formato local
     
@@ -172,7 +173,6 @@ void handle_disconnect(int socket, char *client_ip) {
 
     curr->status = 0;
     memset(curr->ip, 0, sizeof(curr->ip));
-    curr->port = 0;
 
     pthread_mutex_unlock(&mutex);
     response = 0; // OK
@@ -196,5 +196,31 @@ void handle_sendattach(int socket) {
 }
 
 void handle_quit(int socket) {
+    char name[MAX_NAME];
+    int client_port;
+    if (read(socket, name, MAX_NAME )<= 0) return;
+    if (read(socket, &client_port, sizeof(int)) <= 0) return;
+    client_port = ntohl(client_port); // Convertir de red a formato local
+    
+    pthread_mutex_lock(&mutex);
+    User *curr = user_list;
+    while (curr != NULL && strcmp(curr->name, name) != 0) {
+        curr = curr->next;
+    }
+
+    if (curr == NULL) {
+        pthread_mutex_unlock(&mutex);
+        uint8_t response = 1; // no existe → USER_ERROR
+        write(socket, &response, sizeof(uint8_t));
+        return;
+    }
+    curr->status = 0;
+    memset(curr->ip, 0, sizeof(curr->ip));
+    curr->port = 0; // Limpiar la información del usuario
+    curr->next = NULL;
+
+    pthread_mutex_unlock(&mutex);
+    
     printf("[QUIT] Cliente cerró la sesión.\n");
+
 }
