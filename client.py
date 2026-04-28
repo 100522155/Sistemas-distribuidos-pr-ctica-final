@@ -74,10 +74,25 @@ class client:
             return client.RC.ERROR
 
     @staticmethod
-    def users():
-        # TODO
-        print("USERS: no implementado aún")
-        return client.RC.ERROR
+    def users(user):
+        try:
+        # Enviar operación 4 y nombre (256 bytes)
+            client._socket.send(struct.pack('B', 4))
+            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            client._socket.send(struct.pack('!I', 0))
+        # Leer respuesta y contador
+            res = struct.unpack('B', client._socket.recv(1))[0] # Leer el código de respuesta (1 byte), con si la operación fue exitosa o no
+            if res == 0:
+                count = struct.unpack('!I', client._socket.recv(4))[0] # Leer el número de usuarios conectados (4 bytes)
+                print(f"USERS OK: {count} conectados")
+                for _ in range(count): #leer cada usuario (256 bytes)
+                # Leer hasta el \n
+                    line = b"" #linea vacía de bytes
+                    while not line.endswith(b"\n"): # mientras la línea no tenga un salro de línea al final
+                        line += client._socket.recv(1) #lee un byte y lo añade a la línea
+                    print(line.decode().strip()) #decodifica la línea a string, elimina espacios y saltos de línea y la imprime
+        except Exception as e:
+            print(f"Error: {e}")
 
     @staticmethod
     def send(user, message):
@@ -116,8 +131,9 @@ class client:
                     else: print("Uso: DISCONNECT <usuario>")
 
                 elif line[0] == "USERS":
-                    if len(line) == 1: client.users()
-                    else: print("Uso: USERS")
+                    if len(line) == 2: 
+                        client.users(line[1]) # Llama a la función si solo escribes USERS
+                    else: print("Uso: USERS <usuario>")
 
                 elif line[0] == "SEND":
                     if len(line) >= 3:

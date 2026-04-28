@@ -180,11 +180,37 @@ void handle_disconnect(int socket, char *client_ip) {
     printf("[DISCONNECT] Usuario '%s' desconectado.\n", name);
 }
 
-// Stubs para las funciones aún no implementadas
 void handle_users(int socket, char *client_ip) {
-    // TODO
-    uint8_t response = 2;
+    char name[MAX_NAME];
+    if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return;
+
+    uint8_t response = 0;
+    uint32_t count = 0;
+
+    pthread_mutex_lock(&mutex);
+
+    User *curr = user_list;
+    while (curr != NULL) {
+        if (curr->status == 1) count++;
+        curr = curr->next;
+    }
+
+    uint32_t count_net = htonl(count);
     write(socket, &response, sizeof(uint8_t));
+    write(socket, &count_net, sizeof(uint32_t));
+
+    curr = user_list;
+    while (curr != NULL) {
+        if (curr->status == 1) {
+            char buffer[512];
+            int len = snprintf(buffer, sizeof(buffer), "%s %s %d\n",
+                               curr->name, curr->ip, curr->port);
+            write(socket, buffer, len);
+        }
+        curr = curr->next;
+    }
+
+    pthread_mutex_unlock(&mutex);
 }
 
 void handle_send(int socket) {
