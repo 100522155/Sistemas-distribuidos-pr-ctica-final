@@ -19,7 +19,7 @@ void handle_register(int socket);
 void handle_unregister(int socket, char *client_ip);
 void handle_connect(int socket, char *client_ip);
 void handle_disconnect(int socket, char *client_ip);
-void handle_users(int socket, char *client_ip);
+void handle_users(int socket);
 
 // Funciones que solo reciben Socket
 void handle_send(int socket);

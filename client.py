@@ -74,17 +74,18 @@ class client:
             return client.RC.ERROR
 
     @staticmethod
-    def users(user):
+    def users():
         try:
         # Enviar operación 4 y nombre (256 bytes)
             client._socket.send(struct.pack('B', 4))
-            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
-            client._socket.send(struct.pack('!I', 0))
+            user_name = getattr(client, '_cur_user', "anon")
+            client._socket.send(user_name.encode('utf-8').ljust(256, b'\0'))
+
         # Leer respuesta y contador
             res = struct.unpack('B', client._socket.recv(1))[0] # Leer el código de respuesta (1 byte), con si la operación fue exitosa o no
             if res == 0:
                 count = struct.unpack('!I', client._socket.recv(4))[0] # Leer el número de usuarios conectados (4 bytes)
-                print(f"USERS OK: {count} conectados")
+                print(f"USERS: {count} conectados")
                 for _ in range(count): #leer cada usuario (256 bytes)
                 # Leer hasta el \n
                     line = b"" #linea vacía de bytes
@@ -96,8 +97,16 @@ class client:
 
     @staticmethod
     def send(user, message):
-        # TODO
-        return client.RC.ERROR
+        client._socket.send(struct.pack('B', 5)) #operación 5: SEND
+        client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del destinatario (256 bytes)
+        client._socket.send(message.encode('utf-8').ljust(1024, b'\0')) #mensaje (1024 bytes)
+
+        res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
+        if res == 0:
+            print("SEND OK")
+        else:
+            print(f"SEND FAIL ({res})")
+        return client.RC.OK if res == 0 else client.RC.ERROR
 
     @staticmethod
     def sendAttach(user, file, message):
@@ -131,9 +140,9 @@ class client:
                     else: print("Uso: DISCONNECT <usuario>")
 
                 elif line[0] == "USERS":
-                    if len(line) == 2: 
-                        client.users(line[1]) # Llama a la función si solo escribes USERS
-                    else: print("Uso: USERS <usuario>")
+                    if len(line) == 1: 
+                        client.users() # Llama a la función si solo escribes USERS
+                    else: print("Uso: USERS ")
 
                 elif line[0] == "SEND":
                     if len(line) >= 3:

@@ -34,7 +34,7 @@ void handle_register(int socket);
 void handle_unregister(int socket, char *client_ip);
 void handle_connect(int socket, char *client_ip);
 void handle_disconnect(int socket, char *client_ip);
-void handle_users(int socket, char *client_ip);
+void handle_users(int socket);
 void handle_send(int socket);
 void handle_sendattach(int socket);
 void handle_quit(int socket);
@@ -74,7 +74,7 @@ void *thread_function(void *arg) {
         int exit_loop = 0;
         while (!exit_loop) {
             uint8_t op_code;
-            ssize_t bytes = read(client_socket, &op_code, sizeof(op_code));
+            ssize_t bytes = read(client_socket, &op_code, sizeof(op_code)); // Leer el código de operación (1 byte)
             
             if (bytes <= 0) {
                 // El cliente cerró la conexión inesperadamente
@@ -102,7 +102,7 @@ void *thread_function(void *arg) {
 
                 break;
             case 4: //USERS
-                handle_users(client_socket,task.ip);
+                handle_users(client_socket);
                 /* code */
                 break;
             case 5: //SEND

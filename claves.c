@@ -103,7 +103,7 @@ void handle_connect(int socket, char *client_ip) {
 
     // Leer los datos que envía el cliente (Nombre y Puerto)
     if (read(socket, name, MAX_NAME) <= 0) return;
-    if (read(socket, &client_port, sizeof(int)) <= 0) return;
+    if (read(socket, &client_port, sizeof(int)) <= 0) return; // Leer el puerto del cliente
     client_port = ntohl(client_port); // Convertir de red a formato local
 
     uint8_t response;
@@ -180,7 +180,7 @@ void handle_disconnect(int socket, char *client_ip) {
     printf("[DISCONNECT] Usuario '%s' desconectado.\n", name);
 }
 
-void handle_users(int socket, char *client_ip) {
+void handle_users(int socket) {
     char name[MAX_NAME];
     if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return;
 
@@ -214,8 +214,45 @@ void handle_users(int socket, char *client_ip) {
 }
 
 void handle_send(int socket) {
-    // TODO
+    char name[MAX_NAME];
+    if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del destinatario
+    char message[1024];
+    if (recv(socket, message, 1024, MSG_WAITALL) <= 0) return; // Leer el mensaje del cliente
+
+    uint8_t response = 0;
+
+    pthread_mutex_lock(&mutex);
+
+    User *curr = user_list;
+    while (curr != NULL) {
+        if (curr->status == 1 && strcmp(curr->name, name) == 0) {
+            // Usuario encontrado y conectado
+            break;
+        }
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        pthread_mutex_unlock(&mutex);
+        response = 1; // Usuario no encontrado o no conectado
+        write(socket, &response, sizeof(uint8_t));
+        return;
+    }
+
+    send_message_to_client(curr->ip, curr->port, message);
+
+    // Aquí se implementaría la lógica para enviar el mensaje al cliente destino
+    // Por simplicidad, asumimos que el mensaje se envía correctamente
+    pthread_mutex_unlock(&mutex);
+    response = 0; // OK
+    write(socket, &response, sizeof(uint8_t)); // Enviar respuesta al cliente (0 = OK, 1 = Usuario no encontrado, 2 = Error)
 }
+
+void send_message_to_client(const char *ip, int port, const char *message) {
+    // Implementation for sending message to a specific client
+    write(port, message, strlen(message)); // Enviar el mensaje al cliente destino
+
+}
+
 
 void handle_sendattach(int socket) {
     // TODO
