@@ -19,9 +19,6 @@ User *user_list = NULL;       // Cabecera de la lista de usuarios
 //Declaramos un mutex para proteger las secciones críticas de las funciones
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-
-
-
 void handle_register(int socket) {
     char name[MAX_NAME];
     if (read(socket, name, MAX_NAME) <= 0) return;
@@ -218,7 +215,8 @@ void handle_send(int socket) {
     if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del destinatario
     char message[1024];
     if (recv(socket, message, 1024, MSG_WAITALL) <= 0) return; // Leer el mensaje del cliente
-
+    char sender_name[MAX_NAME];
+    if (recv(socket, sender_name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del remitente
     uint8_t response = 0;
 
     pthread_mutex_lock(&mutex);
@@ -238,19 +236,39 @@ void handle_send(int socket) {
         return;
     }
 
-    send_message_to_client(curr->ip, curr->port, message);
+    response = send_message_to_client(curr->ip, curr->port, message, sender_name);
 
     // Aquí se implementaría la lógica para enviar el mensaje al cliente destino
     // Por simplicidad, asumimos que el mensaje se envía correctamente
     pthread_mutex_unlock(&mutex);
-    response = 0; // OK
     write(socket, &response, sizeof(uint8_t)); // Enviar respuesta al cliente (0 = OK, 1 = Usuario no encontrado, 2 = Error)
 }
 
-void send_message_to_client(const char *ip, int port, const char *message) {
+int send_message_to_client(const char *ip, int port, const char *message, char *name) {
     // Implementation for sending message to a specific client
-    write(port, message, strlen(message)); // Enviar el mensaje al cliente destino
+    int sock = socket(AF_INET, SOCK_STREAM, 0); // Crear un socket para enviar el mensaje
+    if (sock < 0) {
+        perror("socket");
+        return 2; // Error al crear el socket
+    }
+    struct sockaddr_in client_addr;
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &client_addr.sin_addr) <= 0) { // Convertir la IP a formato binario
+        perror("inet_pton");
+        close(sock);
+        return 2;
 
+    }// Conectar al cliente destino
+    if (connect(sock, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0 ) {
+        perror("connect");
+        close(sock);
+        return 2; // Error al conectar
+    }
+    write(sock, name, MAX_NAME); 
+    write(sock, message, 1024);
+    close(sock); // Cerrar el socket después de enviar el mensaje
+    return 0;
 }
 
 
