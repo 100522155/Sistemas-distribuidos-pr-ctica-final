@@ -124,6 +124,7 @@ void handle_connect(int socket, char *client_ip) {
         write(socket, &response, sizeof(uint8_t));
         return;
     }
+
     curr->status = 1;
     strncpy(curr->ip, client_ip, 15);
     curr->ip[15] = '\0';
@@ -211,63 +212,160 @@ void handle_users(int socket) {
 }
 
 void handle_send(int socket) {
-    char name[MAX_NAME];
-    if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del destinatario
-    char message[1024];
-    if (recv(socket, message, 1024, MSG_WAITALL) <= 0) return; // Leer el mensaje del cliente
     char sender_name[MAX_NAME];
     if (recv(socket, sender_name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del remitente
-    uint8_t response = 0;
+    char message[1024];
+    if (recv(socket, message, 1024, MSG_WAITALL) <= 0) return; // Leer el mensaje del cliente
+    char name[MAX_NAME];
+    if (recv(socket, name, MAX_NAME, MSG_WAITALL) <= 0) return; // Leer el nombre del destinatario
+    
+    sender_name[MAX_NAME - 1] = '\0';
+    name  [MAX_NAME - 1] = '\0';
+    message    [MAX_MSG  - 1] = '\0';
+
+    uint8_t response;
 
     pthread_mutex_lock(&mutex);
 
-    User *curr = user_list;
-    while (curr != NULL) {
-        if (curr->status == 1 && strcmp(curr->name, name) == 0) {
+    User *receiver = user_list;
+    while (receiver != NULL) {
+        if (strcmp(receiver->name, name) == 0) {
+            // Usuario encontrado
+            break;
+        }
+        receiver = receiver->next;
+    }
+
+    User *sender = user_list;
+    while (sender != NULL) {
+        if (sender->status == 1 && strcmp(sender->name, sender_name) == 0) {
             // Usuario encontrado y conectado
             break;
         }
-        curr = curr->next;
+        sender = sender->next;
     }
-    if (curr == NULL) {
+    if (receiver == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1; // Usuario no encontrado o no conectado
         write(socket, &response, sizeof(uint8_t));
         return;
     }
 
-    response = send_message_to_client(curr->ip, curr->port, message, sender_name);
 
-    // Aquí se implementaría la lógica para enviar el mensaje al cliente destino
-    // Por simplicidad, asumimos que el mensaje se envía correctamente
+    if (sender != NULL) {
+        sender->last_msg_id++; // Incrementar el ID del mensaje para el remitente
+        if (sender->last_msg_id == 0) sender->last_msg_id = 1; // Evitar que el ID sea 0
+    } else {
+        pthread_mutex_unlock(&mutex);
+        response = 1; // Usuario remitente no encontrado o no conectado
+        write(socket, &response, sizeof(uint8_t));
+        return;
+    }
+
+
+    //Preparar el mensaje para añadirlo a la lista de pendientes del receptor
+    Message *new_msg = (Message *)malloc(sizeof(Message));
+    if (new_msg == NULL) {
+        pthread_mutex_unlock(&mutex);
+        response = 2; // Error de memoria
+        write(socket, &response, sizeof(uint8_t));
+        return;
+    }
+    printf("mensaje id %u con contenido: %s\n", sender->last_msg_id, message);
+    new_msg->id = sender->last_msg_id;
+    strncpy(new_msg->sender, sender_name, MAX_NAME);
+    strncpy(new_msg->content, message, MAX_MSG);
+    new_msg->next = NULL;
+    // Añadir el mensaje a la lista de mensajes pendientes del receptor
+    if (receiver->pending_msgs == NULL) {
+        receiver->pending_msgs = new_msg;
+    } else {
+        Message *curr = receiver->pending_msgs;
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        curr->next = new_msg;
+    } //Hemos insertado en los mensajes pendientes del receptor el nuevo mensaje, ahora tenemos que enviarlo al cliente destino. Si el envío falla, el mensaje quedará pendiente para futuros intentos de entrega. Si el envío es exitoso, el mensaje se eliminará de la lista de pendientes.
+    /*responder con todo ok*/
+    response = 0;
+
+    // Responder al remitente que el mensaje se ha recibido correctamente
+    write(socket, &response, sizeof(uint8_t)); 
+    char id_str[16];
+    snprintf(id_str, sizeof(id_str), "%u", sender->last_msg_id); // Convertir el ID del mensaje a cadena
+    write(socket, &id_str, strlen(id_str) +1); // Enviar el ID del mensaje al cliente remitente + '/0'
+
+
+    char receiver_name[MAX_NAME];
+    strncpy(receiver_name, receiver->name, MAX_NAME);
+    unsigned int msg_id_saved = new_msg->id;
+    //Si el usuario destino se encuentra conectado, intentar enviar de inmediato el mensaje
+    if (receiver->status == 1){
+        pthread_mutex_unlock(&mutex);
+        //Aqui a lo mejor habría que corregir algunas cosillas, como por ejemplo el formato del mensaje que se envía al cliente destino, o el hecho de que el mensaje se elimina de la lista de pendientes solo si el envío es exitoso.
+        int send_result = send_message_to_client(receiver->ip, receiver->port,
+                                         sender_name, msg_id_saved, message);
+        pthread_mutex_lock(&mutex);
+        if (send_result == 0) {
+            
+            // Envío exitoso, eliminar el mensaje de la lista de pendientes
+            Message *curr = receiver->pending_msgs;
+            Message *prev = NULL;
+            while (curr != NULL) {
+                if (curr->id == new_msg->id) {
+                    if (prev == NULL) {
+                        receiver->pending_msgs = curr->next;
+                    } else {
+                        prev->next = curr->next;
+                    }
+                    free(curr);
+                    break;
+                }
+                prev = curr;
+                curr = curr->next;
+            }
+        }
+    }
     pthread_mutex_unlock(&mutex);
-    write(socket, &response, sizeof(uint8_t)); // Enviar respuesta al cliente (0 = OK, 1 = Usuario no encontrado, 2 = Error)
+    printf("s> SEND MESSAGE %u FROM %s TO %s\n",
+                   msg_id_saved, sender_name, receiver_name);
+
+
 }
 
-int send_message_to_client(const char *ip, int port, const char *message, char *name) {
+int send_message_to_client(const char *ip, int port,
+                           const char *sender, unsigned int msg_id,
+                           const char *message){
     // Implementation for sending message to a specific client
     int sock = socket(AF_INET, SOCK_STREAM, 0); // Crear un socket para enviar el mensaje
     if (sock < 0) {
         perror("socket");
-        return 2; // Error al crear el socket
+        return -1; // Error al crear el socket
     }
     struct sockaddr_in client_addr;
+    memset(&client_addr, 0, sizeof(client_addr)); // Limpiar la estructura de dirección
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(port);
     if (inet_pton(AF_INET, ip, &client_addr.sin_addr) <= 0) { // Convertir la IP a formato binario
         perror("inet_pton");
         close(sock);
-        return 2;
+        return -1;
 
     }// Conectar al cliente destino
     if (connect(sock, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0 ) {
         perror("connect");
         close(sock);
-        return 2; // Error al conectar
-    }
-    write(sock, name, MAX_NAME); 
-    write(sock, message, 1024);
+        return -1; // Error al conectar
+    }    
+    const char *op = "SEND_MESSAGE"; // Operación que se va a realizar, "SEND_MESSAGE"
+    write(sock, op, strlen(op)+1); // Enviar el ID del mensaje al cliente destino
+    write(sock, sender, strlen(sender) + 1); // Enviar el nombre del remitente al cliente destino
+    char id_str[32];
+    snprintf(id_str, sizeof(id_str), "%u", msg_id);
+    write(sock, id_str, strlen(id_str) + 1);  // añadir esto antes del mensaje
+    write(sock, message, strlen(message) + 1); // Enviar el mensaje al cliente destino
     close(sock); // Cerrar el socket después de enviar el mensaje
+    // Aquí se podría implementar una lógica para esperar una respuesta del cliente destino si es necesario
     return 0;
 }
 

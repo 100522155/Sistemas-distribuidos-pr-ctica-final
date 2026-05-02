@@ -2,6 +2,7 @@ from enum import Enum
 import argparse
 import socket
 import struct
+import threading
 
 class client:
 
@@ -13,6 +14,9 @@ class client:
     _server = None
     _port   = -1
     _socket = None
+    _listen_thread = None
+    _listen_socket = None
+    _listening = False
 
     @staticmethod
     def register(user):
@@ -45,9 +49,28 @@ class client:
     @staticmethod
     def connect(user):
         try:
+            
+            tmp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tmp.bind(('', 0))
+            client._listen_port = tmp.getsockname()[1]
+            tmp.close()
+
+            listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Creamos un socket para escuchar las conexiones entrantes del servidor
+            listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listen_socket.bind(('', client._listen_port))
+            listen_socket.listen(10)
+
+            client._listen_socket = listen_socket
+            client._listening = True
+            thr = threading.Thread(target=client.listen_thread, daemon=True)
+            thr.start()
+            client._listen_thread = thr
+
+
             client._socket.send(struct.pack('B', 2))
             client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
-            client._socket.send(struct.pack('!I', 6000))  # puerto de escucha del cliente
+            client._socket.send(struct.pack('!I', client._listen_port))  # puerto de escucha del cliente
+            client._cur_user = user
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("CONNECT OK")
             elif res == 1: print("EL USUARIO NO EXISTE")
@@ -64,6 +87,7 @@ class client:
             client._socket.send(struct.pack('B', 3))
             client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
             client._socket.send(struct.pack('!I', 0))
+            client._listening = False
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("DISCONNECT OK")
             elif res == 1: print("DISCONNECT: usuario no registrado")
@@ -98,8 +122,10 @@ class client:
     @staticmethod
     def send(user, message):
         client._socket.send(struct.pack('B', 5)) #operación 5: SEND
-        client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del destinatario (256 bytes)
+        sender = getattr(client, '_cur_user', "anon")
+        client._socket.send(sender.encode('utf-8').ljust(256, b'\0')) #nombre del destinatario (256 bytes)
         client._socket.send(message.encode('utf-8').ljust(1024, b'\0')) #mensaje (1024 bytes)
+        client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del remitente (256 bytes)
 
         res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
         if res == 0:
@@ -112,6 +138,31 @@ class client:
     def sendAttach(user, file, message):
         # TODO
         return client.RC.ERROR
+
+    @staticmethod
+    def listen_thread():
+        """Hilo de escucha: acepta mensajes del servidor y otros clientes"""
+        while client._listening:
+            try:
+                # Aceptar la conexión del servidor o de otro cliente
+                connection, address = client._listen_socket.accept()
+                
+                # Leer el nombre del remitente (256 bytes)
+                sender_name = connection.recv(256).decode('utf-8').strip('\x00')
+
+                
+                # Leer el mensaje (1024 bytes)
+                message = connection.recv(1024).decode('utf-8').strip('\x00')
+                
+                # Mostrar el mensaje recibido
+                print(f"\n>>> Mensaje de {sender_name}: {message}")
+                print("c> ", end="", flush=True)
+                
+                connection.close()
+            except Exception as e:
+                if client._listening:
+                    print(f"Error en listen_thread: {e}")
+                break
 
     @staticmethod
     def shell():
@@ -198,7 +249,7 @@ class client:
             return
 
         client.shell()
-        client._socket.close()
+        client._socket.close() #Cerramos la conexión con el servidor al salir de la shell (salimos del shell con el comando QUIT)
         print("+++ FINISHED +++")
 
 
