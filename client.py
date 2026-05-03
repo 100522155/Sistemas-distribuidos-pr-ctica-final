@@ -126,7 +126,7 @@ class client:
         client._socket.send(sender.encode('utf-8').ljust(256, b'\0')) #nombre del destinatario (256 bytes)
         client._socket.send(message.encode('utf-8').ljust(1024, b'\0')) #mensaje (1024 bytes)
         client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del remitente (256 bytes)
-
+        #Se recibe una respuesta del servidor, que es un byte que indica si el envío fue exitoso o no
         res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
         print(f"Respuesta del servidor: {res}")
         if res == 0:
@@ -160,10 +160,11 @@ class client:
                 print("c> ", end="", flush=True)
                 
                 connection.close()
-            except Exception as e:
+            except Exception as e: 
                 if client._listening:
                     print(f"Error en listen_thread: {e}")
                 break
+        #Logica de recibo de mensajes atrasados 
 
     @staticmethod
     def shell():

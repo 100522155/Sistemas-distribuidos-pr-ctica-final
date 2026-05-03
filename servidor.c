@@ -64,7 +64,7 @@ task_t dequeue() {
     return task; // Devolvemos la tarea de la cola
 }
 
-void *thread_function(void *arg) {
+void *thread_function() {
     while (1) {
         task_t task = dequeue(); 
         int client_socket = task.socket;
@@ -132,7 +132,7 @@ void *thread_function(void *arg) {
 
 
 int main() {
-    int server_socket, client_socket;
+    int server_socket, client_socket; //Creamos los descriptores de socket para el servidor y el cliente
     struct sockaddr_in server_addr, client_addr; //struct de tres clases: Familia (IPv4), IP y Puerto.
     socklen_t client_addr_len = sizeof(client_addr); // Variable para almacenar el tamaño de la dirección del cliente
     pthread_t threads[NUM_THREADS];
@@ -143,8 +143,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    int opt = 1;
+    int opt = 1; // Opción para reutilizar la dirección del socket
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    // Configuramos el socket para que sea no bloqueante (opcional, dependiendo de la implementación de los hilos)
+    // fcntl(server_socket, F_SETFL, O_NONBLOCK);
 
     // Configuramos la dirección del servidor
     memset(&server_addr, 0, sizeof(server_addr)); // Limpiamos la estructura de la dirección del servidor

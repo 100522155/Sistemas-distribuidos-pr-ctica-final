@@ -22,12 +22,12 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 void handle_register(int socket) {
     char name[MAX_NAME];
     if (read(socket, name, MAX_NAME) <= 0) return;
-    name[MAX_NAME - 1] = '\0'; // seguridad
+    name[MAX_NAME - 1] = '\0'; // se le resta uno para asegurarnos de que el nombre siempre termina con un carácter nulo, incluso si el cliente envía un nombre que ocupa exactamente MAX_NAME bytes sin incluir el carácter nulo al final. Esto evita posibles problemas de desbordamiento de búfer o lectura de memoria no válida al tratar de acceder al nombre del usuario en otras partes del código.
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
 
-    User *curr = user_list;
+    User *curr = user_list; //buscamos el usuario en la lista para comprobar si ya existe, user_list = NULL al principio, y se va actualizando a medida que se añaden usuarios a la lista, siempre apuntando al primer usuario de la lista. Si el usuario que queremos registrar ya existe, respondemos con un error. Si no existe, lo añadimos al principio de la lista.
     while (curr != NULL) {
         if (strcmp(curr->name, name) == 0) {
             pthread_mutex_unlock(&mutex);
@@ -38,7 +38,7 @@ void handle_register(int socket) {
         curr = curr->next;
     }
 
-    // No existe → lo añadimos
+    // No existe y lo añadimos
     User *new_user = (User *)malloc(sizeof(User));
     if (new_user == NULL) {
         pthread_mutex_unlock(&mutex);
@@ -49,10 +49,11 @@ void handle_register(int socket) {
     strncpy(new_user->name, name, MAX_NAME);
     new_user->status = 0;
     new_user->port   = 0;
-    memset(new_user->ip, 0, sizeof(new_user->ip));
-    new_user->next = user_list;
-    user_list = new_user;
-
+    memset(new_user->ip, 0, sizeof(new_user->ip)); //liberamos la memoria de la IP, ya que el usuario no está conectado, y por lo tanto no tiene una IP asignada
+    new_user->last_msg_id = 0;
+    new_user->next = user_list; // Insertamos el nuevo usuario al principio de la lista
+    user_list = new_user; // Actualizamos la cabecera de la lista para que apunte al nuevo usuario
+ 
     pthread_mutex_unlock(&mutex);
     response = 0; // OK
     write(socket, &response, sizeof(uint8_t));
@@ -129,6 +130,38 @@ void handle_connect(int socket, char *client_ip) {
     strncpy(curr->ip, client_ip, 15);
     curr->ip[15] = '\0';
     curr->port = client_port;
+
+    //Cuando se conecten los usuarios, se les intentará entregar los mensajes pendientes que tengan en su lista de mensajes pendientes, y si el envío es exitoso, se eliminarán de la lista de pendientes. Si el envío falla, los mensajes seguirán en la lista de pendientes para futuros intentos de entrega.
+    Message *msg = curr->pending_msgs;
+    if (msg != NULL) {
+        printf("[CONNECT] Usuario '%s' tiene mensajes pendientes. Intentando entregar...\n", name);
+        while (msg != NULL) {
+            int send_result = send_message_to_client(curr->ip, curr->port,
+                                                     msg->sender, msg->id, msg->content);
+            if (send_result == 0) {
+                printf("[CONNECT] Mensaje pendiente ID %u entregado a '%s'.\n", msg->id, name);
+                // Envío exitoso, eliminar el mensaje de la lista de pendientes
+                Message *to_delete = msg;
+                msg = msg->next; // Mover al siguiente mensaje antes de eliminar el actual
+                // Eliminar el mensaje de la lista de pendientes
+                if (curr->pending_msgs == to_delete) {
+                    curr->pending_msgs = to_delete->next;
+                } else {
+                    Message *prev_msg = curr->pending_msgs;
+                    while (prev_msg != NULL && prev_msg->next != to_delete) {
+                        prev_msg = prev_msg->next;
+                    }
+                    if (prev_msg != NULL) {
+                        prev_msg->next = to_delete->next;
+                    }
+                }
+                free(to_delete);
+            } else {
+                printf("[CONNECT] Error al entregar mensaje pendiente ID %u a '%s'. Se mantendrá en la lista de pendientes.\n", msg->id, name);
+                msg = msg->next; // Mover al siguiente mensaje para intentar entregar el siguiente pendiente
+            }
+        }
+    }
 
     pthread_mutex_unlock(&mutex);
     response = 0; 
