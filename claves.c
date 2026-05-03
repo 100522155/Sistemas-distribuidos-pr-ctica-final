@@ -357,12 +357,15 @@ int send_message_to_client(const char *ip, int port,
         close(sock);
         return -1; // Error al conectar
     }    
-    const char *op = "SEND_MESSAGE"; // Operación que se va a realizar, "SEND_MESSAGE"
-    write(sock, op, strlen(op)+1); // Enviar el ID del mensaje al cliente destino
-    write(sock, sender, strlen(sender) + 1); // Enviar el nombre del remitente al cliente destino
+    write(sock,"sender: ", 9); // Enviar un prefijo para indicar que lo que sigue es el nombre del remitente
+    write(sock, sender, strlen(sender)+1); // Enviar el nombre del remitente al cliente destino
+    write(sock, " ", 2); // Separador entre la operación y el nombre del remitente
     char id_str[32];
+    write(sock,"message: ", 10); // Enviar un prefijo para indicar que lo que sigue es el mensaje a enviar
     snprintf(id_str, sizeof(id_str), "%u", msg_id);
-    write(sock, id_str, strlen(id_str) + 1);  // añadir esto antes del mensaje
+    write(sock, id_str, strlen(id_str) + 1);  // añadir esto antes del mensaje +1 para incluir el carácter nulo al final de la cadena
+    write(sock, " ", 2); // Separador entre la operación y el nombre del remitente
+    write(sock,"content: ", 10); // Enviar un prefijo para indicar que lo que sigue es el mensaje a enviar
     write(sock, message, strlen(message) + 1); // Enviar el mensaje al cliente destino
     close(sock); // Cerrar el socket después de enviar el mensaje
     // Aquí se podría implementar una lógica para esperar una respuesta del cliente destino si es necesario

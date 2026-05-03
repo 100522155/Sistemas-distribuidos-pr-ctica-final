@@ -128,6 +128,7 @@ class client:
         client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del remitente (256 bytes)
 
         res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
+        print(f"Respuesta del servidor: {res}")
         if res == 0:
             print("SEND OK")
         else:
@@ -147,15 +148,15 @@ class client:
                 # Aceptar la conexión del servidor o de otro cliente
                 connection, address = client._listen_socket.accept()
                 
-                # Leer el nombre del remitente (256 bytes)
-                sender_name = connection.recv(256).decode('utf-8').strip('\x00')
+                # Leer el mensaje completo enviado por el servidor o el cliente, que incluye el nombre del remitente, el número del mensaje y el contenido del mensaje
+                complete_message = connection.recv(1024).decode('utf-8').strip('\x00')
+                #Omitimos el "SEND " al principio del mensaje
+                sender_name = complete_message.split("sender: ")[1].split(" ")[0]  #Usuario que envía el mensaje, que es la primera palabra del mensaje completo 
+                number_message = complete_message.split("message: ")[1].split(" ")[0]  #Usuario que envía el mensaje, que es la primera palabra del mensaje completo
+                message = complete_message.split("content: ")[1].strip()  #Mensaje que se envía, que es lo que sigue a "content: " en el mensaje completo
 
-                
-                # Leer el mensaje (1024 bytes)
-                message = connection.recv(1024).decode('utf-8').strip('\x00')
-                
                 # Mostrar el mensaje recibido
-                print(f"\n>>> Mensaje de {sender_name}: {message}")
+                print(f"\n>>> Mensaje de {sender_name} {number_message}: {message}")
                 print("c> ", end="", flush=True)
                 
                 connection.close()
