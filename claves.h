@@ -27,7 +27,7 @@ typedef struct User {
 
 // Funciones que reciben Socket e IP
 void handle_register(int socket);
-void handle_unregister(int socket, char *client_ip);
+void handle_unregister(int socket);
 void handle_connect(int socket, char *client_ip);
 void handle_disconnect(int socket, char *client_ip);
 void handle_users(int socket);

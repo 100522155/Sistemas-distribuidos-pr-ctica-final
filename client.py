@@ -142,29 +142,19 @@ class client:
 
     @staticmethod
     def listen_thread():
-        """Hilo de escucha: acepta mensajes del servidor y otros clientes"""
         while client._listening:
             try:
-                # Aceptar la conexión del servidor o de otro cliente
-                connection, address = client._listen_socket.accept()
-                
-                # Leer el mensaje completo enviado por el servidor o el cliente, que incluye el nombre del remitente, el número del mensaje y el contenido del mensaje
-                complete_message = connection.recv(1024).decode('utf-8').strip('\x00')
-                #Omitimos el "SEND " al principio del mensaje
-                sender_name = complete_message.split("sender: ")[1].split(" ")[0]  #Usuario que envía el mensaje, que es la primera palabra del mensaje completo 
-                number_message = complete_message.split("message: ")[1].split(" ")[0]  #Usuario que envía el mensaje, que es la primera palabra del mensaje completo
-                message = complete_message.split("content: ")[1].strip()  #Mensaje que se envía, que es lo que sigue a "content: " en el mensaje completo
-
-                # Mostrar el mensaje recibido
+                connection, _ = client._listen_socket.accept()
+                data = connection.recv(1024).decode('utf-8').replace('\x00', '').strip()
+                sender_name, number_message, message = data.split("|", 2)
                 print(f"\n>>> Mensaje de {sender_name} {number_message}: {message}")
                 print("c> ", end="", flush=True)
-                
                 connection.close()
-            except Exception as e: 
+            except Exception as e:
                 if client._listening:
                     print(f"Error en listen_thread: {e}")
                 break
-        #Logica de recibo de mensajes atrasados 
+
 
     @staticmethod
     def shell():

@@ -31,7 +31,7 @@ pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex para proteger 
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; // Condición para notificar a los hilos trabajadores de que hay tareas disponibles
 
 void handle_register(int socket);
-void handle_unregister(int socket, char *client_ip);
+void handle_unregister(int socket);
 void handle_connect(int socket, char *client_ip);
 void handle_disconnect(int socket, char *client_ip);
 void handle_users(int socket);
@@ -90,7 +90,7 @@ void *thread_function() {
                 /* code */
                 break;
             case 1: //UNREGISTER
-                handle_unregister(client_socket,task.ip);
+                handle_unregister(client_socket);
                 /* code */
                 break;
             case 2: //CONNECT
