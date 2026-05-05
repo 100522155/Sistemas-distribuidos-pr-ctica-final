@@ -19,37 +19,47 @@ class client:
     _listening = False
 
     @staticmethod
-    def register(user):
+    def register(user): #Crear un socket por cada operacion que realice el cliente, para evitar problemas de concurrencia al compartir un mismo socket entre varias operaciones. Cada vez que el cliente realiza una operación (como REGISTER, UNREGISTER, CONNECT, etc.), se crea un nuevo socket para esa operación específica. Esto permite que cada operación se maneje de forma independiente y evita posibles conflictos o bloqueos que podrían surgir al compartir un mismo socket entre múltiples operaciones concurrentes.
         try:
-            client._socket.send(struct.pack('B', 0))
-            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+
+
+            client._socket.send(b"REGISTER\0")
+            client._socket.send(user.encode('utf-8') + b'\0')
             res = struct.unpack('B', client._socket.recv(1))[0]
+            client._socket.close()
             if   res == 0: print("REGISTER OK")
-            elif res == 1: print("REGISTER IN USE")
+            elif res == 1: print("USERNAME IN USE")
             else:          print(f"REGISTER FAIL")
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en REGISTER: {e}")
+            client._socket.close()
             return client.RC.ERROR
 
     @staticmethod
     def unregister(user):
         try:
-            client._socket.send(struct.pack('B', 1))
-            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"UNREGISTER\0")
+            client._socket.send(user.encode('utf-8') + b'\0')
             res = struct.unpack('B', client._socket.recv(1))[0]
+            client._socket.close()
             if   res == 0: print("UNREGISTER OK")
             elif res == 1: print("USER DOES NOT EXIST")
             else:          print(f"UNREGISTER FAIL ({res})")
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en UNREGISTER: {e}")
+            client._socket.close()
             return client.RC.ERROR
 
     @staticmethod
     def connect(user):
         try:
-            
+            #Buscamos un puerto libre 
             tmp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             tmp.bind(('', 0))
             client._listen_port = tmp.getsockname()[1]
@@ -66,17 +76,28 @@ class client:
             thr.start()
             client._listen_thread = thr
 
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"CONNECT\0")
+            client._socket.send(user.encode('utf-8') + b'\0')
+            client._socket.send(str(client._listen_port).encode('utf-8') + b'\0') # Enviamos el puerto de escucha del cliente al servidor para que el servidor sepa a qué puerto debe enviar los mensajes al cliente. Esto es necesario para que el servidor pueda establecer una conexión con el cliente y enviarle los mensajes entrantes. Al enviar el puerto de escucha del cliente durante la operación CONNECT, el servidor puede mantener un registro de los clientes conectados y sus respectivos puertos de escucha, lo que le permite enrutar correctamente los mensajes a cada cliente.
 
-            client._socket.send(struct.pack('B', 2))
-            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
-            client._socket.send(struct.pack('!I', client._listen_port))  # puerto de escucha del cliente
-            client._cur_user = user
             res = struct.unpack('B', client._socket.recv(1))[0]
+            client._socket.close()
+            
+            client._cur_user = user
+            
             if   res == 0: print("CONNECT OK")
-            elif res == 1: print("EL USUARIO NO EXISTE")
-            elif res == 2: print("EL USUARIO YA ESTÁ CONECTADO")
-            else:          print(f"CONNECT FAIL ({res})")
+            elif res == 1: print("CONNECT FAIL, USER DOES NOT EXIST")
+            elif res == 2: print("USER ALREADY CONNECTED")
+            else:          print("CONNECT FAIL")
+
+            if res != 0:
+                client._listening = False
+                client._listen_socket.close()
+
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+        
         except Exception as e:
             print(f"Error en CONNECT: {e}")
             return client.RC.ERROR
@@ -84,14 +105,17 @@ class client:
     @staticmethod
     def disconnect(user):
         try:
-            client._socket.send(struct.pack('B', 3))
-            client._socket.send(user.encode('utf-8').ljust(256, b'\0'))
-            client._socket.send(struct.pack('!I', 0))
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"DISCONNECT\0")
+            client._socket.send(user.encode('utf-8') + b'\0')
             client._listening = False
             res = struct.unpack('B', client._socket.recv(1))[0]
             if   res == 0: print("DISCONNECT OK")
-            elif res == 1: print("DISCONNECT: usuario no registrado")
-            else:          print(f"DISCONNECT ERROR ({res})")
+            elif res == 1: print("DISCONNECT FAIL, USER DOES NOT EXIST")
+            elif res == 2: print("DISCONNECT FAIL, USER NOT CONNECTED")
+            else:          print("DISCONNECT FAIL")
+            client._socket.close()
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en DISCONNECT: {e}")
@@ -101,39 +125,65 @@ class client:
     def users():
         try:
         # Enviar operación 4 y nombre (256 bytes)
-            client._socket.send(struct.pack('B', 4))
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"USERS\0")
             user_name = getattr(client, '_cur_user', "anon")
-            client._socket.send(user_name.encode('utf-8').ljust(256, b'\0'))
+            client._socket.send(user_name.encode('utf-8') + b'\0')
 
         # Leer respuesta y contador
             res = struct.unpack('B', client._socket.recv(1))[0] # Leer el código de respuesta (1 byte), con si la operación fue exitosa o no
             if res == 0:
-                count = struct.unpack('!I', client._socket.recv(4))[0] # Leer el número de usuarios conectados (4 bytes)
-                print(f"USERS: {count} conectados")
-                for _ in range(count): #leer cada usuario (256 bytes)
-                # Leer hasta el \n
-                    line = b"" #linea vacía de bytes
-                    while not line.endswith(b"\n"): # mientras la línea no tenga un salro de línea al final
-                        line += client._socket.recv(1) #lee un byte y lo añade a la línea
-                    print(line.decode().strip()) #decodifica la línea a string, elimina espacios y saltos de línea y la imprime
+                count_str = b""
+                while True:
+                    c = client._socket.recv(1)
+                    if c == b'\0': break
+                    count_str += c
+                count = int(count_str.decode())
+                print(f"CONNECTED USERS ({count} users connected) OK")  # formato exacto del enunciado
+
+                for _ in range(count):
+                    name = b""
+                    while True:
+                        c = client._socket.recv(1)
+                        if c == b'\0': break
+                        name += c
+                    print(f"  {name.decode()}")
+            elif res == 1:
+                print("CONNECTED USERS FAIL, USER IS NOT CONNECTED")
+            else:
+                print("CONNECTED USERS FAIL")
+            client._socket.close()
+            return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
+            
         except Exception as e:
             print(f"Error: {e}")
 
     @staticmethod
     def send(user, message):
-        client._socket.send(struct.pack('B', 5)) #operación 5: SEND
-        sender = getattr(client, '_cur_user', "anon")
-        client._socket.send(sender.encode('utf-8').ljust(256, b'\0')) #nombre del destinatario (256 bytes)
-        client._socket.send(message.encode('utf-8').ljust(1024, b'\0')) #mensaje (1024 bytes)
-        client._socket.send(user.encode('utf-8').ljust(256, b'\0')) #nombre del remitente (256 bytes)
-        #Se recibe una respuesta del servidor, que es un byte que indica si el envío fue exitoso o no
-        res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
-        print(f"Respuesta del servidor: {res}")
-        if res == 0:
-            print("SEND OK")
-        else:
-            print(f"SEND FAIL ({res})")
-        return client.RC.OK if res == 0 else client.RC.ERROR
+        try:
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"SEND\0") #operación 5: SEND
+            sender = getattr(client, '_cur_user', "anon")
+            client._socket.send(sender.encode('utf-8') + b'\0')   # remitente
+            client._socket.send(user.encode('utf-8') + b'\0')     # destinatario
+            client._socket.send(message.encode('utf-8') + b'\0')  # mensaje
+            #Se recibe una respuesta del servidor, que es un byte que indica si el envío fue exitoso o no
+            res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
+            if res == 0:
+                id_str = b""
+                while True:
+                    c = client._socket.recv(1)
+                    if c == b'\0': break
+                    id_str += c
+                print(f"SEND OK - MESSAGE {id_str.decode()}")
+            elif res == 1: print("SEND FAIL, USER DOES NOT EXIST")
+            else:          print("SEND FAIL")
+            return client.RC.OK if res == 0 else client.RC.ERROR
+        except Exception as e:
+            print(f"Error en SEND: {e}")
+            return client.RC.ERROR
 
     @staticmethod
     def sendAttach(user, file, message):
@@ -145,9 +195,46 @@ class client:
         while client._listening:
             try:
                 connection, _ = client._listen_socket.accept()
-                data = connection.recv(1024).decode('utf-8').replace('\x00', '').strip()
-                sender_name, number_message, message = data.split("|", 2)
-                print(f"\n>>> Mensaje de {sender_name} {number_message}: {message}")
+                
+                # Leer la operación (cadena terminada en \0)
+                op = b""
+                while True:
+                    c = connection.recv(1)
+                    if c == b'\0': break
+                    op += c
+                op = op.decode()
+
+                if op == "SEND_MESSAGE":
+                    sender = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        sender += c
+                    
+                    msg_id = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        msg_id += c
+                    
+                    message = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        message += c
+                    
+                    print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()}")
+                    print(f"   {message.decode()}")
+                    print("   END")
+
+                elif op == "SEND_MESS_ACK":
+                    msg_id = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        msg_id += c
+                    print(f"\nc> SEND MESSAGE {msg_id.decode()} OK")
+
                 print("c> ", end="", flush=True)
                 connection.close()
             except Exception as e:
@@ -232,16 +319,7 @@ class client:
             client.usage()
             return
 
-        try:
-            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client._socket.connect((client._server, client._port))
-            print(f"Conectado a {client._server}:{client._port}")
-        except Exception as e:
-            print(f"Error conectando al servidor: {e}")
-            return
-
         client.shell()
-        client._socket.close() #Cerramos la conexión con el servidor al salir de la shell (salimos del shell con el comando QUIT)
         print("+++ FINISHED +++")
 
 
