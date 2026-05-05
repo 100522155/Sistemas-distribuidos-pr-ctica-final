@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include "claves.h"
 
-#define PORT 5000 //Puerto a utilizar
+#define PORT 5000 //Puerto a utilizar, esto hay que quitarlo porque el puerto se define en el main del servidor y no debería estar hardcodeado en claves.c
 #define BUFFER_SIZE 1024 //tamaño del buffer para recibir datos
 #define NUM_THREADS 8 //Número de hilos trabajadores
 
@@ -95,7 +95,7 @@ void *thread_function() {
 
             if      (strcmp(op, "REGISTER")   == 0) handle_register(client_socket);
             else if (strcmp(op, "UNREGISTER") == 0) handle_unregister(client_socket);
-            else if (strcmp(op, "CONNECT")    == 0) handle_connect(client_socket, task.ip);
+            else if (strcmp(op, "CONNECT")    == 0) handle_connect(client_socket, task.ip); //Se requiere la ip para esta operacion
             else if (strcmp(op, "DISCONNECT") == 0) handle_disconnect(client_socket, task.ip);
             else if (strcmp(op, "USERS")      == 0) handle_users(client_socket);
             else if (strcmp(op, "SEND")       == 0) handle_send(client_socket);
@@ -116,7 +116,21 @@ void *thread_function() {
 }
 
 
-int main() {
+int main(int argc, char *argv[]) {
+    //Obtenemos el puerto del servidor de los argumentos, si se proporciona, o usamos el puerto por defecto
+    int port = PORT; // Valor por defecto
+
+    if (argc == 2) {
+        port = atoi(argv[1]); // Accedemos al índice 1
+    } else if (argc > 2) {
+        fprintf(stderr, "Uso: %s [puerto]\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    if (port <= 0 || port > 65535) {
+        fprintf(stderr, "Puerto inválido: %d. Debe estar entre 1 y 65535.\n", port);
+        exit(EXIT_FAILURE);
+    }
     int server_socket, client_socket; //Creamos los descriptores de socket para el servidor y el cliente
     struct sockaddr_in server_addr, client_addr; //struct de tres clases: Familia (IPv4), IP y Puerto.
     socklen_t client_addr_len = sizeof(client_addr); // Variable para almacenar el tamaño de la dirección del cliente
@@ -137,7 +151,7 @@ int main() {
     memset(&server_addr, 0, sizeof(server_addr)); // Limpiamos la estructura de la dirección del servidor
     server_addr.sin_family = AF_INET; // Familia de direcciones (IPv4)
     server_addr.sin_addr.s_addr = INADDR_ANY; // Aceptamos conexiones en cualquier interfaz de red
-    server_addr.sin_port = htons(PORT); // Convertimos el número de puerto a formato de red
+    server_addr.sin_port = htons(port); // Convertimos el número de puerto a formato de red
 
     // Enlazamos el socket a la dirección del servidor
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
@@ -153,7 +167,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor escuchando en el puerto %d...\n", PORT);
+    printf("Servidor escuchando en el puerto %d...\n", port);
 
     for (int i = 0; i < NUM_THREADS; i++) {
         if (pthread_create(&threads[i], NULL, thread_function, NULL) != 0) {

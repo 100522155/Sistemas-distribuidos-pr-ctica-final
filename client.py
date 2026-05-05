@@ -228,6 +228,14 @@ class client:
                     print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()}")
                     print(f"   {message.decode()}")
 
+                elif op == "SEND_MESS_ACK": #Esto ocurre si el cliente ha enviado un mensaje a otro cliente que está desconectado, el servidor le envía un mensaje de ACK para informarle que el mensaje no se ha podido entregar, y el cliente muestra ese mensaje al usuario.
+                    msg_id = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        msg_id += c
+                    print(f"\nc> SEND MESSAGE {msg_id.decode()} OK")
+
                 print("c> ", end="", flush=True)
                 connection.close()
             except Exception as e:
