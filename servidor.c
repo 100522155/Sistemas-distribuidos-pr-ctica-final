@@ -66,61 +66,46 @@ task_t dequeue() {
 
 void *thread_function() {
     while (1) {
-        task_t task = dequeue(); 
+        task_t task = dequeue();
         int client_socket = task.socket;
-        char client_ip[16];
-        strcpy(client_ip, task.ip);
 
         int exit_loop = 0;
         while (!exit_loop) {
-            uint8_t op_code;
-            ssize_t bytes = read(client_socket, &op_code, sizeof(op_code)); // Leer el código de operación (1 byte)
-            
-            if (bytes <= 0) {
-                // El cliente cerró la conexión inesperadamente
-                printf("[Hilo %ld] Cliente %s desconectado (EOF/error).\n",
+
+            // Leer operación byte a byte hasta '\0'
+            char op[32];
+            int op_len = 0;
+            int ok = 1;
+            while (op_len < (int)sizeof(op) - 1) { // Leemos la operación byte a byte hasta encontrar el carácter nulo '\0' que indica el final de la cadena, o hasta alcanzar el tamaño máximo del buffer para evitar desbordamientos. Si se alcanza el tamaño máximo sin encontrar un carácter nulo, se detiene la lectura para evitar problemas de seguridad.
+                ssize_t r = read(client_socket, &op[op_len], 1); //ler un byte de la operación
+                if (r <= 0) { ok = 0; break; } // Si hay un error o el cliente se desconecta, salimos del bucle
+                if (op[op_len] == '\0') break; // Si encontramos el carácter nulo, hemos leído toda la operación y podemos salir del bucle
+                op_len++;//longitud de la operación leída hasta ahora
+            }
+            op[op_len] = '\0'; // Aseguramos que la operación es una cadena de caracteres terminada en nulo para evitar problemas de seguridad al procesarla posteriormente
+
+            if (!ok) {
+                printf("[Hilo %ld] Cliente %s desconectado.\n",
                        pthread_self(), task.ip);
                 exit_loop = 1;
                 break;
             }
-            switch (op_code) {
 
-            case 0: //REGISTER
-                handle_register(client_socket);
-                /* code */
-                break;
-            case 1: //UNREGISTER
-                handle_unregister(client_socket);
-                /* code */
-                break;
-            case 2: //CONNECT
-                handle_connect(client_socket,task.ip);
-                //Si devuelve 0, el cliente se ha conectado correctamente. Si devuelve -1, el cliente no estaba registrado. 
-                break;
-            case 3: //DISCONNECT
-                handle_disconnect(client_socket,task.ip);
+            printf("[Hilo %ld] Operación recibida: '%s'\n", pthread_self(), op);
 
-                break;
-            case 4: //USERS
-                handle_users(client_socket);
-                /* code */
-                break;
-            case 5: //SEND
-                handle_send(client_socket);
-                /* code */
-                break;
-            case 6: //SENDATTACH
-                handle_sendattach(client_socket);
-                /* code */
-                break;
-            case 7: //QUIT
+            if      (strcmp(op, "REGISTER")   == 0) handle_register(client_socket);
+            else if (strcmp(op, "UNREGISTER") == 0) handle_unregister(client_socket);
+            else if (strcmp(op, "CONNECT")    == 0) handle_connect(client_socket, task.ip);
+            else if (strcmp(op, "DISCONNECT") == 0) handle_disconnect(client_socket, task.ip);
+            else if (strcmp(op, "USERS")      == 0) handle_users(client_socket);
+            else if (strcmp(op, "SEND")       == 0) handle_send(client_socket);
+            else if (strcmp(op, "SENDATTACH") == 0) handle_sendattach(client_socket);
+            else if (strcmp(op, "QUIT")       == 0) {
                 handle_quit(client_socket);
                 exit_loop = 1;
-                /* code */
-                break;
-
-            default: //ERROR
-                break;
+            }
+            else {
+                printf("[Hilo %ld] Operación desconocida: '%s'\n", pthread_self(), op);
             }
         }
 

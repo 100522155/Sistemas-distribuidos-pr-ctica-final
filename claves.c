@@ -19,11 +19,11 @@ User *user_list = NULL;       // Cabecera de la lista de usuarios
 //Declaramos un mutex para proteger las secciones críticas de las funciones
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void handle_register(int socket) {
-    char name[MAX_NAME];
-    if (read(socket, name, MAX_NAME) <= 0) return;
-    name[MAX_NAME - 1] = '\0'; // se le resta uno para asegurarnos de que el nombre siempre termina con un carácter nulo, incluso si el cliente envía un nombre que ocupa exactamente MAX_NAME bytes sin incluir el carácter nulo al final. Esto evita posibles problemas de desbordamiento de búfer o lectura de memoria no válida al tratar de acceder al nombre del usuario en otras partes del código.
+void handle_register(int socket) { //Se debe crear un socket para cada cliente que se conecta al servidor, y cada socket se maneja en un hilo separado, por lo que cada función de manejo de operaciones (como handle_register) se ejecuta en un hilo diferente para cada cliente. Esto permite que el servidor pueda atender a múltiples clientes simultáneamente sin bloquearse, ya que cada operación se maneja de forma independiente en su propio hilo.
 
+    char name[MAX_NAME];
+    if (read_str(socket, name, MAX_NAME) < 0) return;
+    
     uint8_t response;
     pthread_mutex_lock(&mutex);
 
@@ -87,7 +87,7 @@ void handle_unregister(int socket) {
         user_list = curr->next;
     else
         prev->next = curr->next;
-    free(curr);
+    
     //Liberar uno a uno los mensajes pendientes del usuario 
     Message *msg = curr->pending_msgs;
     while (msg != NULL) {
@@ -95,6 +95,7 @@ void handle_unregister(int socket) {
         free(msg);
         msg = next;
     }
+    free(curr);
     pthread_mutex_unlock(&mutex);
     response = 0; // OK
     write(socket, &response, sizeof(uint8_t));
@@ -174,12 +175,12 @@ void handle_connect(int socket, char *client_ip) {
 
 void handle_disconnect(int socket, char *client_ip) {
     char name[MAX_NAME];
-    int client_port;
+    int port_str;
 
     // 1. Leer los datos que envía el cliente (Nombre y Puerto)
     if (read(socket, name, MAX_NAME )<= 0) return;
-    if (read(socket, &client_port, sizeof(int)) <= 0) return;
-    client_port = ntohl(client_port); // Convertir de red a formato local
+    if (read(socket, &port_str, sizeof(int)) <= 0) return;
+    int client_port = atoi(port_str);
     
     uint8_t response;
     // 2. BLOQUEAR la lista para actualizar el estado de forma segura
