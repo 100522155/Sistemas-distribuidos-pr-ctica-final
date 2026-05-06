@@ -189,8 +189,54 @@ class client:
 
     @staticmethod
     def sendAttach(user, file, message):
-        # TODO
-        return client.RC.ERROR
+        try:
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client._socket.connect((client._server, client._port))
+            client._socket.send(b"SENDATTACH\0")
+
+            sender = getattr(client, '_cur_user', "anon")
+            client._socket.send(sender.encode('utf-8') + b'\0')
+            client._socket.send(user.encode('utf-8') + b'\0')
+            client._socket.send(message.encode('utf-8') + b'\0')
+            
+            # --- CORRECCIÓN DE LECTURA ---
+            with open(file, 'rb') as f:
+                while True:
+                    data = f.read(1024) # 1024 o 256 es indiferente, pero 1024 es más eficiente
+                    if not data:
+                        break # Fin del archivo
+                    client._socket.sendall(data) #sendall asegura que se envíe todo el bloque
+            
+            # IMPORTANTE: Aquí el servidor debe saber que el archivo terminó.
+            # Si el protocolo no envía el tamaño antes, el servidor podría quedarse bloqueado.
+            # Suponiendo que el servidor detecta el final o tú envías un cierre:
+            # client._socket.shutdown(socket.SHUT_WR) # Opcional: indica que no enviarás más datos
+            res_raw = client._socket.recv(1) # Esperamos a que el servidor nos envíe la respuesta despues de recibir el archivo.
+            if not res_raw: #Si no recibimos nada, significa que cerro la conexión, lo que indica un error en el envío.
+                return client.RC.ERROR
+                
+            res = struct.unpack('B', res_raw)[0] #Devolver el resultado de la operación, que es un byte que indica si el envío fue exitoso o no. El servidor debe enviar esta respuesta después de procesar el mensaje y el archivo adjunto, para que el cliente sepa si todo se ha recibido correctamente.
+            
+            if res == 0:
+                id_str = b""
+                while True:
+                    c = client._socket.recv(1)
+                    if not c or c == b'\0': break
+                    id_str += c
+                print(f"SEND OK - MESSAGE {id_str.decode()}")
+                return client.RC.OK
+            elif res == 1: 
+                print("SEND FAIL, USER DOES NOT EXIST")
+            else:          
+                print("SEND FAIL")
+            
+            client._socket.shutdown(socket.SHUT_WR) #Cerramos el socket de envío después de recibir la respuesta del servidor, para indicar que no se enviarán más datos y permitir que el servidor procese la solicitud y libere los recursos asociados a esa conexión. Esto es especialmente importante después de enviar un archivo adjunto, ya que el servidor necesita saber cuándo ha terminado de recibir los datos para poder procesarlos correctamente.
+            
+            return client.RC.ERROR
+
+        except Exception as e:
+            print(f"Error en SEND: {e}")
+            return client.RC.ERROR
 
     @staticmethod
     def listen_thread():
