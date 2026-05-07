@@ -198,14 +198,15 @@ class client:
             client._socket.send(sender.encode('utf-8') + b'\0')
             client._socket.send(user.encode('utf-8') + b'\0')
             client._socket.send(message.encode('utf-8') + b'\0')
+            client._socket.send(file.encode('utf-8') + b'\0')
             
             # --- CORRECCIÓN DE LECTURA ---
-            with open(file, 'rb') as f:
-                while True:
-                    data = f.read(1024) # 1024 o 256 es indiferente, pero 1024 es más eficiente
-                    if not data:
-                        break # Fin del archivo
-                    client._socket.sendall(data) #sendall asegura que se envíe todo el bloque
+            #with open(file, 'rb') as f:
+                #while True:
+                    #data = f.read(1024) # 1024 o 256 es indiferente, pero 1024 es más eficiente
+                    #if not data:
+                        #break # Fin del archivo
+                    #client._socket.sendall(data) #sendall asegura que se envíe todo el bloque
             
             # IMPORTANTE: Aquí el servidor debe saber que el archivo terminó.
             # Si el protocolo no envía el tamaño antes, el servidor podría quedarse bloqueado.
@@ -237,6 +238,11 @@ class client:
         except Exception as e:
             print(f"Error en SEND: {e}")
             return client.RC.ERROR
+    
+    def getfile():
+        #TODO
+        return
+
 
     @staticmethod
     def listen_thread():
@@ -273,14 +279,30 @@ class client:
                     
                     print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()}")
                     print(f"   {message.decode()}")
-
-                elif op == "SEND_MESS_ACK": #Esto ocurre si el cliente ha enviado un mensaje a otro cliente que está desconectado, el servidor le envía un mensaje de ACK para informarle que el mensaje no se ha podido entregar, y el cliente muestra ese mensaje al usuario.
+                elif op == "SEND_ATTACH":
+                    sender = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        sender += c
+                    
                     msg_id = b""
                     while True:
                         c = connection.recv(1)
                         if c == b'\0': break
                         msg_id += c
-                    print(f"\nc> SEND MESSAGE {msg_id.decode()} OK")
+                    filename = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        filename += c
+                    message = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        message += c
+
+                    print(f"\nc> SENDATTACH MESSAGE {sender.decode()} {msg_id.decode()} {filename.decode()} {message.decode()} OK")   
 
                 print("c> ", end="", flush=True)
                 connection.close()

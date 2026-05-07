@@ -163,7 +163,7 @@ void handle_connect(int socket, char *client_ip) {
 
     while (msg != NULL) {
         Message *nxt = msg->next;
-        if (strlen(msg->filename) >1) {r = send_attach_to_client(local_ip, client_port,
+        if (msg->filename[0] != '\0') {r = send_attach_to_client(local_ip, client_port,
                                        msg->sender, msg->id, msg->content, msg->filename); //Asignamos los datos para enviar el mensaje al cliente
                                        
         }else {r = send_message_to_client(local_ip, client_port,
@@ -185,11 +185,9 @@ void handle_connect(int socket, char *client_ip) {
 void handle_disconnect(int socket, char *client_ip) {
     (void)client_ip;
     char name[MAX_NAME];
-    char port_str[16];
 
     /* Puerto llega como string */
     if (read_str(socket, name,     MAX_NAME)        < 0) return;
-    if (read_str(socket, port_str, sizeof(port_str)) < 0) return; //Sacamos puerto y nombre
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -318,6 +316,7 @@ void handle_send(int socket) {
     new_msg->next = NULL; //siguiente mensaje por escribir todavía no existe, se asigna NULL
     strncpy(new_msg->sender,  sender_name, MAX_NAME); //se completan los campos
     strncpy(new_msg->content, message,     MAX_MSG);
+    new_msg->filename[0] = '\0';
 
     if (receiver->pending_msgs == NULL) {
         receiver->pending_msgs = new_msg; //Añadir mensaje a la lista si no hay ninguno pendiente

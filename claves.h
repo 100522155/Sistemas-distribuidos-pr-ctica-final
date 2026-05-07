@@ -40,9 +40,9 @@ void handle_send(int socket);
 void handle_sendattach(int socket);
 void handle_quit(int socket);
 
-int  send_message_attach_to_client(const char *ip, int port,  
-                                    const char *sender, unsigned int msg_id,
-                                    const char *message, const char *filename);
+int send_attach_to_client(const char *ip, int port,
+                           const char *sender, unsigned int msg_id,
+                           const char *message, const char *filename);
 
 int  send_message_to_client(const char *ip, int port,
                              const char *sender, unsigned int msg_id,
