@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include "claves.h"
 
-#define PORT 5000
+#define PORT 5000 //Esto hay que quitarlo
 #define MAX_NAME 256
 
 User *user_list = NULL;
@@ -159,10 +159,16 @@ void handle_connect(int socket, char *client_ip) {
     curr->pending_msgs = NULL;
     pthread_mutex_unlock(&mutex);
 
+    int r;
+
     while (msg != NULL) {
         Message *nxt = msg->next;
-        int r = send_message_to_client(local_ip, client_port,
+        if (strlen(msg->filename) >1) {r = send_attach_to_client(local_ip, client_port,
+                                       msg->sender, msg->id, msg->content, msg->filename); //Asignamos los datos para enviar el mensaje al cliente
+                                       
+        }else {r = send_message_to_client(local_ip, client_port,
                                        msg->sender, msg->id, msg->content); //Asignamos los datos para enviar el mensaje al cliente
+        }
         if (r == 0)
             printf("[CONNECT] Mensaje %u entregado a '%s'.\n", msg->id, name);
         else
@@ -217,7 +223,7 @@ void handle_disconnect(int socket, char *client_ip) {
     printf("[DISCONNECT] Usuario '%s' desconectado.\n", name);
 }
 
-void handle_users(int socket) {
+void handle_users(int socket) { 
     char name[MAX_NAME];
     if (read_str(socket, name, MAX_NAME) < 0) return; //Leemos nombre de usuario 
 
@@ -253,9 +259,13 @@ void handle_users(int socket) {
 
     //Un nombre por usuario conectado, terminado en '\0'
     curr = user_list;
+    char user_info[512];
     while (curr != NULL) {
-        if (curr->status == 1)
-            write(socket, curr->name, strlen(curr->name) + 1);
+        if (curr->status == 1){
+            snprintf(user_info, sizeof(user_info), "%s -- %s -- %d", 
+                     curr->name, curr->ip, curr->port);
+            write(socket, user_info, strlen(user_info) + 1);
+        }
         curr = curr->next;
     } //Escribimos en el socket el nombre de cada usuario conectado, terminado en '\0' para que el cliente sepa dónde termina cada nombre.
 
@@ -361,7 +371,7 @@ void handle_send(int socket) {
             }
         }
     }
-    
+
 
     pthread_mutex_unlock(&mutex);
     printf("s> SEND MESSAGE %u FROM %s TO %s\n", msg_id_saved, sender_name, receiver_name);
@@ -398,9 +408,76 @@ int send_message_to_client(const char *ip, int port,
 }
 
 void handle_sendattach(int socket) {
-    (void)socket;
-    /* TODO */
+    char sender_name[MAX_NAME];
+    char dest_name[MAX_NAME];
+    char message[MAX_MSG];
+    char filename[MAX_FILE];
+
+    //Orden: remitente, destinatario, mensaje 
+    if (read_str(socket, sender_name, MAX_NAME) < 0) return;
+    if (read_str(socket, dest_name,   MAX_NAME) < 0) return;
+    if (read_str(socket, message,     MAX_MSG)  < 0) return;
+    if (read_str(socket, filename,     MAX_FILE)  < 0) return;
+
+    uint8_t response;
+    pthread_mutex_lock(&mutex);
+
+    static unsigned int global_msg_id_attach = 0; //Contador global para asignar IDs únicos a los mensajes enviados. Se incrementa cada vez que se envía un mensaje, y si llega a 0 (desbordamiento), se reinicia a 1 para evitar usar el ID 0, que podría usarse para indicar ausencia de mensaje o error.
+
+    User *receiver = user_list;
+    while (receiver != NULL && strcmp(receiver->name, dest_name) != 0)
+        receiver = receiver->next;
+
+    User *sender = user_list;
+    while (sender != NULL &&
+           !(strcmp(sender->name, sender_name) == 0 && sender->status == 1))
+        sender = sender->next;
+
+    if (receiver == NULL || sender == NULL) {
+        pthread_mutex_unlock(&mutex);
+        response = 1;
+        write(socket, &response, 1);
+        return;
+    }
+    global_msg_id_attach++; // Mensaje 1 de Ana a Luis, mensaje 2 de Luis a Ana, mensaje 3 de Ana a Carlos, etc.
+    if (global_msg_id_attach == 0) global_msg_id_attach = 1;
+
+    //Como se envía el nombre del el recibidor, el remitente, el mensaje y luego todos los datos del adjunto, el proceso de guardado del mensaje pendiente es similar al de handle_send,
+    //pero se redibiran todos los bytes del archivo en 1024 bytes de vez
+
+    
+
 }
+
+int send_attach_to_client(const char *ip, int port,
+                            const char *sender, unsigned int msg_id,
+                            const char *message,const char *filename){
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) { perror("socket"); return -1; }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(port);
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
+        perror("inet_pton"); close(sock); return -1;
+    }
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("connect"); close(sock); return -1;
+    }
+
+    // Protocolo que listen_thread espera:
+    // "SEND_ATTACH\0" + sender\0 + id\0 + message\0  + filename\0
+    write(sock, "SEND_ATTACH", strlen("SEND_ATTACH") + 1);
+    write(sock, sender,  strlen(sender)  + 1);
+    char id_str[32];
+    snprintf(id_str, sizeof(id_str), "%u", msg_id);
+    write(sock, id_str,  strlen(id_str)  + 1);
+    write(sock, message, strlen(message) + 1);
+    write(sock, filename, strlen(filename) + 1);
+    close(sock);
+    return 0;
+                            }
 
 //Quit 
 void handle_quit(int socket) {

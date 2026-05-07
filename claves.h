@@ -6,14 +6,17 @@
 
 #define MAX_NAME 256
 #define MAX_MSG  256
+#define MAX_FILE 256
 
 /* Mensaje pendiente de entrega */
 typedef struct Message {
     unsigned int    id;              // identificador del mensaje
     char            sender[MAX_NAME];// quien lo envió
     char            content[MAX_MSG];// contenido
+    char            filename[MAX_FILE]; // nombre del fichero
     struct Message *next;
 } Message;
+
 
 typedef struct User {
     char name[MAX_NAME];   // nombre de usuario
@@ -37,7 +40,12 @@ void handle_send(int socket);
 void handle_sendattach(int socket);
 void handle_quit(int socket);
 
+int  send_message_attach_to_client(const char *ip, int port,  
+                                    const char *sender, unsigned int msg_id,
+                                    const char *message, const char *filename);
+
 int  send_message_to_client(const char *ip, int port,
                              const char *sender, unsigned int msg_id,
                              const char *message);
+
 #endif
