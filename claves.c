@@ -260,7 +260,7 @@ void handle_users(int socket) {
     char user_info[512];
     while (curr != NULL) {
         if (curr->status == 1){
-            snprintf(user_info, sizeof(user_info), "%s -- %s -- %d", 
+            snprintf(user_info, sizeof(user_info), "%s :: %s :: %d", 
                      curr->name, curr->ip, curr->port);
             write(socket, user_info, strlen(user_info) + 1);
         }

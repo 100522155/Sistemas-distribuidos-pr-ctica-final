@@ -3,6 +3,7 @@ import argparse
 import socket
 import struct
 import threading
+import os
 
 class client:
 
@@ -11,6 +12,7 @@ class client:
         ERROR      = 1
         USER_ERROR = 2
 
+    _connected_users = {} #Lista de usuarios que tiene este que están conectados
     _server = None
     _port   = -1
     _socket = None
@@ -239,9 +241,103 @@ class client:
             print(f"Error en SEND: {e}")
             return client.RC.ERROR
     
-    def getfile():
-        #TODO
-        return
+    def getfile(username, remote_filename, local_filename):
+
+        if username not in client._connected_users:
+            #Hacemos un users para buscar si el usuario que queremos que nos envíe los datos si no los tenemos.
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((client._server, client._port))
+            s.send(b"USERS\0")
+            user_name = getattr(client, '_cur_user', "anon")
+            s.send(user_name.encode('utf-8') + b'\0')
+            res = struct.unpack('B', s.recv(1))[0]
+            if res == 0:
+                count_str = b""
+                while True:
+                    c = s.recv(1)
+                    if c == b'\0': break
+                    count_str += c
+                count = int(count_str.decode())
+                for _ in range(count):
+                    name = b""
+                    while True:
+                        c = s.recv(1)
+                        if c == b'\0': break
+                        name += c
+                    parts = name.decode().split("::")
+                    if len(parts) == 3:
+                        uname, uip, uport = parts[0], parts[1], parts[2]
+                        client._connected_users[uname] = (uip, int(uport))
+            s.close() 
+
+            if username not in client._connected_users:
+                print(f"c> GET_FILE FAIL, {username} not connected")
+                return client.RC.ERROR 
+
+            sender_ip, sender_port = client._connected_users[username]    
+
+            #Connectarse al socket del emisor
+            s_list = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s_list.connect((sender_ip, sender_port))
+            except Exception as e:
+                print(f"c> GET_FILE FAIL, cannot connect to {username}: {e}")
+                return client.RC.ERROR
+            s_list.send(b"GETFILE\0")
+            s_list.send(remote_filename.encode('utf-8') + b'\0')
+
+
+            response = s_list.recv(1)#Lo que se recibe
+
+            if not response:
+                print("GET_FILE FAIL")
+                return client.RC.ERROR
+
+            response_code = response[0]
+            if response_code != 0:
+                print("c> GET_FILE FAIL")
+                s_list.close()
+                return client.RC.ERROR
+            
+            #Leer el tamaño del fichero
+            size_str = b""
+
+            while True:
+                c =s_list.recv(1)
+                if not c or c == b'\0': break
+                size_str  += c
+            size_str = int(size_str.decode())
+            
+            received = 0
+            try:
+                with open(local_filename, "wb") as f:
+                    while received < size_str:
+                        data = s_list.recv(min(4096,size_str-received))
+                        if not data:
+                            break
+                        f.write(data)
+                        received += len(data)
+            except Exception as e:
+                print(f"c> GET_FILE FAIL: {e}")
+                s_list.close()
+                return client.RC.ERROR
+
+            if received == size_str:
+                print("GET_FILE OK")
+                return client.RC.OK
+            else:
+                if os.path.exists(local_filename):
+                    os.remove(local_filename)
+                print("GET_FILE FAIL")
+                return client.RC.ERROR
+
+        if username not in client._connected_users:
+            print("c> FILE TRANSFER FAILED, user not connected.")
+            return client.RC.ERROR
+        
+
+
+
 
 
     @staticmethod
@@ -303,9 +399,31 @@ class client:
                         message += c
 
                     print(f"\nc> SENDATTACH MESSAGE {sender.decode()} {msg_id.decode()} {filename.decode()} {message.decode()} OK")   
+                    print("c> ", end="", flush=True)
+                    connection.close()
 
-                print("c> ", end="", flush=True)
-                connection.close()
+                elif op == "GETFILE":
+                    # Leer nombre del fichero remoto pedido
+                    filename = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        filename += c
+                    filename = filename.decode()
+
+                    import os
+                    if os.path.exists(filename):
+                        size = os.path.getsize(filename)
+                        connection.send(bytes([0]))                          # OK
+                        connection.send(str(size).encode() + b'\0')         # tamaño
+                        with open(filename, 'rb') as f:
+                            while True:
+                                data = f.read(4096)
+                                if not data: break
+                                connection.sendall(data)
+                    else:
+                        connection.send(bytes([1]))                          # FAIL
+
             except Exception as e:
                 if client._listening:
                     print(f"Error en listen_thread: {e}")
@@ -352,8 +470,19 @@ class client:
 
                 elif line[0] == "SENDATTACH":
                     if len(line) >= 4:
-                        client.sendAttach(line[1], line[2], ' '.join(line[3:])) #4 aurgumentos o mas, la operacion, el usuario el fichero y el mensaje, se llama a la función sendAttach con esos argumentos. El mensaje se obtiene uniendo con espacios los argumentos a partir de line[3] hasta el final de la línea, usando ' '.join(line[3:]), para permitir mensajes con espacios.
+                        #Guardamos los campos para emplearlos luego en el getfile
+                        dest     = line[1]
+                        filename = line[-1]
+                        message  = ' '.join(line[2:-1])
+                        client.sendAttach(dest, message, filename) #4 aurgumentos o mas, la operacion, el usuario el fichero y el mensaje, se llama a la función sendAttach con esos argumentos. El mensaje se obtiene uniendo con espacios los argumentos a partir de line[3] hasta el final de la línea, usando ' '.join(line[3:]), para permitir mensajes con espacios.
                     else: print("Uso: SENDATTACH <usuario> <fichero> <mensaje>")
+                
+                elif line[0] == "GETFILE":
+                    # GETFILE <usuario> <fichero_remoto> <fichero_local>
+                    if len(line) == 4:
+                        client.getfile(line[1], line[2], line[3])
+                    else:
+                        print("Uso: GETFILE <usuario> <fichero_remoto> <fichero_local>")
 
                 elif line[0] == "QUIT": # solo quit sin argumentos, para salir del cliente
                     if len(line) == 1: break
