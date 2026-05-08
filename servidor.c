@@ -85,14 +85,9 @@ void *thread_function() {
             op[op_len] = '\0'; // Aseguramos que la operación es una cadena de caracteres terminada en nulo para evitar problemas de seguridad al procesarla posteriormente
 
             if (!ok) {
-                printf("[Hilo %ld] Cliente %s desconectado.\n",
-                       pthread_self(), task.ip);
                 exit_loop = 1;
                 break;
             }
-
-            printf("[Hilo %ld] Operación recibida: '%s'\n", pthread_self(), op);
-
             if      (strcmp(op, "REGISTER")   == 0) handle_register(client_socket);
             else if (strcmp(op, "UNREGISTER") == 0) handle_unregister(client_socket);
             else if (strcmp(op, "CONNECT")    == 0) handle_connect(client_socket, task.ip); //Se requiere la ip para esta operacion
@@ -104,13 +99,9 @@ void *thread_function() {
                 handle_quit(client_socket);
                 exit_loop = 1;
             }
-            else {
-                printf("[Hilo %ld] Operación desconocida: '%s'\n", pthread_self(), op);
-            }
-        }
 
+        }
         close(client_socket);
-        printf("[Hilo %ld] Socket %d cerrado.\n", pthread_self(), client_socket);
     }
     return NULL;
 }
@@ -128,7 +119,6 @@ int main(int argc, char *argv[]) {
     }
 
     if (port <= 0 || port > 65535) {
-        fprintf(stderr, "Puerto inválido: %d. Debe estar entre 1 y 65535.\n", port);
         exit(EXIT_FAILURE);
     }
     int server_socket, client_socket; //Creamos los descriptores de socket para el servidor y el cliente
@@ -186,10 +176,7 @@ int main(int argc, char *argv[]) {
         task_t new_task;
         new_task.socket = client_socket;
 
-        strcpy(new_task.ip, inet_ntoa(client_addr.sin_addr));
-
-        printf("Cliente conectado: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        
+        strcpy(new_task.ip, inet_ntoa(client_addr.sin_addr));        
         // Añadimos la nueva conexión a la cola de tareas para que los hilos trabajadores la atiendan
         enqueue(new_task);
     }

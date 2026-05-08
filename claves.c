@@ -31,9 +31,9 @@ static int read_str(int sock, char *buf, int maxlen) { // read_str lee el byte d
 } // se lee de byte en byte porque el protocolo define que cada cadena va terminada en '\0', y no se sabe de antemano su longitud. 
 // El maxlen-1 es para asegurarse de dejar espacio para el '\0' final.
 
-void handle_register(int socket) {
+void handle_register(int sock) {
     char name[MAX_NAME];
-    if (read_str(socket, name, MAX_NAME) < 0) return;
+    if (read_str(sock, name, MAX_NAME) < 0) return;
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -43,7 +43,7 @@ void handle_register(int socket) {
         if (strcmp(curr->name, name) == 0) {
             pthread_mutex_unlock(&mutex);
             response = 1;
-            write(socket, &response, 1); // Usuario ya existe
+            write(sock, &response, 1); // Usuario ya existe
             printf("s> REGISTER %s FAIL\n", name);
             return;
         }
@@ -54,7 +54,7 @@ void handle_register(int socket) {
     if (new_user == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 2;
-        write(socket, &response, 1); // Error al crear el usuario
+        write(sock, &response, 1); // Error al crear el usuario
         return;
     }
     //Se ponen todos los nuevos campos a cero o a valores por defecto.
@@ -69,13 +69,13 @@ void handle_register(int socket) {
 
     pthread_mutex_unlock(&mutex);
     response = 0;
-    write(socket, &response, 1);
+    write(sock, &response, 1);
     printf("s> REGISTER %s OK\n", name);
 }
 
-void handle_unregister(int socket) {
+void handle_unregister(int sock) {
     char name[MAX_NAME];
-    if (read_str(socket, name, MAX_NAME) < 0) return;
+    if (read_str(sock, name, MAX_NAME) < 0) return;
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -91,7 +91,7 @@ void handle_unregister(int socket) {
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> UNREGISTER %s FAIL\n", name);
         return;
     }
@@ -112,18 +112,18 @@ void handle_unregister(int socket) {
 
     pthread_mutex_unlock(&mutex);
     response = 0;
-    write(socket, &response, 1);
+    write(sock, &response, 1);
     printf("s> UNREGISTER %s OK\n", name);
 }
 
 //Conexion de un usuario, se actualiza su estado a conectado y se le entregan los mensajes pendientes.
-void handle_connect(int socket, char *client_ip) {
+void handle_connect(int sock, char *client_ip) {
     char name[MAX_NAME]; //Nombre del usuario que se conecta
     char port_str[16]; //Puerto del cliente que se conecta, llega como string para simplificar el protocolo. Se convertirá a int con atoi.
 
     /* Puerto llega como string, no como int binario */
-    if (read_str(socket, name,     MAX_NAME)        < 0) return; //leer hasta '\0' y guardar el nombre
-    if (read_str(socket, port_str, sizeof(port_str)) < 0) return; //leer hasta '\0' y guardar el puerto como string
+    if (read_str(sock, name,     MAX_NAME)        < 0) return; //leer hasta '\0' y guardar el nombre
+    if (read_str(sock, port_str, sizeof(port_str)) < 0) return; //leer hasta '\0' y guardar el puerto como string
     int client_port = atoi(port_str);
 
     uint8_t response;
@@ -138,7 +138,7 @@ void handle_connect(int socket, char *client_ip) {
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> CONNECT %s FAIL\n", name);
         return;
     }
@@ -146,7 +146,7 @@ void handle_connect(int socket, char *client_ip) {
     if (curr->status == 1) {
         pthread_mutex_unlock(&mutex);
         response = 2;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> CONNECT %s FAIL\n", name);
         return;
     }
@@ -163,35 +163,28 @@ void handle_connect(int socket, char *client_ip) {
     curr->pending_msgs = NULL;
     pthread_mutex_unlock(&mutex);
 
-    int r;
-
     while (msg != NULL) {
         Message *nxt = msg->next;
-        if (msg->filename[0] != '\0') {r = send_attach_to_client(local_ip, client_port,
-                                       msg->sender, msg->id, msg->content, msg->filename); //Asignamos los datos para enviar el mensaje al cliente
-                                       
-        }else {r = send_message_to_client(local_ip, client_port,
-                                       msg->sender, msg->id, msg->content); //Asignamos los datos para enviar el mensaje al cliente
+        if (msg->filename[0] != '\0') {
+            send_attach_to_client(local_ip, client_port, msg->sender, msg->id, msg->content, msg->filename);
+        } else {
+            send_message_to_client(local_ip, client_port, msg->sender, msg->id, msg->content);
         }
-        if (r == 0)
-            printf("s> CONNECT %s OK\n", name);
-        else
-            printf("s> CONNECT %s FAIL\n", name);
         free(msg);
         msg = nxt;
     }
 
     response = 0;
-    write(socket, &response, 1);
+    write(sock, &response, 1);
     printf("s> CONNECT %s OK\n", name);
 }
 
-void handle_disconnect(int socket, char *client_ip) {
+void handle_disconnect(int sock, char *client_ip) {
     (void)client_ip;
     char name[MAX_NAME];
 
     /* Puerto llega como string */
-    if (read_str(socket, name,     MAX_NAME)        < 0) return;
+    if (read_str(sock, name,     MAX_NAME)        < 0) return;
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -203,14 +196,14 @@ void handle_disconnect(int socket, char *client_ip) {
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> DISCONNECT %s FAIL\n", name);
         return;
     }
     if (curr->status == 0) {
         pthread_mutex_unlock(&mutex);
         response = 2;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> DISCONNECT %s FAIL\n", name);
         return;
     }
@@ -223,13 +216,13 @@ void handle_disconnect(int socket, char *client_ip) {
 
     pthread_mutex_unlock(&mutex);
     response = 0;
-    write(socket, &response, 1);
+    write(sock, &response, 1);
     printf("s> DISCONNECT %s OK\n", name);
 }
 
-void handle_users(int socket) { 
+void handle_users(int sock) { 
     char name[MAX_NAME];
-    if (read_str(socket, name, MAX_NAME) < 0) return; //Leemos nombre de usuario 
+    if (read_str(sock, name, MAX_NAME) < 0) return; //Leemos nombre de usuario 
 
     pthread_mutex_lock(&mutex);
 
@@ -242,7 +235,7 @@ void handle_users(int socket) {
     if (req == NULL || req->status == 0) {
         pthread_mutex_unlock(&mutex);
         uint8_t r = 1;
-        write(socket, &r, 1);
+        write(sock, &r, 1);
         printf("s> USERS %s FAIL\n", name);
         return;
     }
@@ -256,11 +249,11 @@ void handle_users(int socket) {
 
     // Código OK (1 byte) + count como string terminado en '\0' + lista de usuarios conectados (cada nombre terminado en '\0')
     uint8_t response = 0; //evitar problemas de formato utilizar uint8_t para el código de respuesta, aunque solo se usan 0,1,2, es más claro que usar un int. Se envía como un byte al cliente.
-    write(socket, &response, 1);
+    write(sock, &response, 1);
 
     char count_str[16];
     snprintf(count_str, sizeof(count_str), "%u", count);
-    write(socket, count_str, strlen(count_str) + 1);
+    write(sock, count_str, strlen(count_str) + 1);
 
     //Un nombre por usuario conectado, terminado en '\0'
     curr = user_list;
@@ -269,7 +262,7 @@ void handle_users(int socket) {
         if (curr->status == 1){
             snprintf(user_info, sizeof(user_info), "%s :: %s :: %d", 
                      curr->name, curr->ip, curr->port);
-            write(socket, user_info, strlen(user_info) + 1);
+            write(sock, user_info, strlen(user_info) + 1);
         }
         curr = curr->next;
     } //Escribimos en el socket el nombre de cada usuario conectado, terminado en '\0' para que el cliente sepa dónde termina cada nombre.
@@ -279,15 +272,15 @@ void handle_users(int socket) {
     printf("s> USERS %s OK\n", name);
 }
 
-void handle_send(int socket) {
+void handle_send(int sock) {
     char sender_name[MAX_NAME];
     char dest_name[MAX_NAME];
     char message[MAX_MSG];
 
     //Orden: remitente, destinatario, mensaje 
-    if (read_str(socket, sender_name, MAX_NAME) < 0) return;
-    if (read_str(socket, dest_name,   MAX_NAME) < 0) return;
-    if (read_str(socket, message,     MAX_MSG)  < 0) return;
+    if (read_str(sock, sender_name, MAX_NAME) < 0) return;
+    if (read_str(sock, dest_name,   MAX_NAME) < 0) return;
+    if (read_str(sock, message,     MAX_MSG)  < 0) return;
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -306,8 +299,8 @@ void handle_send(int socket) {
     if (receiver == NULL || sender == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
-        printf("s> SEND %s FAIL\n", sender);
+        write(sock, &response, 1);
+        printf("s> SEND %s FAIL\n", sender_name);
         return;
     }
 
@@ -318,8 +311,8 @@ void handle_send(int socket) {
     if (new_msg == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 2;
-        write(socket, &response, 1);
-        
+        write(sock, &response, 1);
+        printf("s> SEND %s FAIL\n", sender_name);
         return;
     }
     new_msg->id   = global_msg_id; //Asignar id de mensaje global único
@@ -338,10 +331,10 @@ void handle_send(int socket) {
 
     //Responder OK + ID al remitente
     response = 0;
-    write(socket, &response, 1); //Respuesta de OK
+    write(sock, &response, 1); //Respuesta de OK
     char id_str[16];
     snprintf(id_str, sizeof(id_str), "%u", global_msg_id); //convertir mensaje a string
-    write(socket, id_str, strlen(id_str) + 1); //Enviar ID del mensaje al cliente, terminado en '\0' para que el cliente sepa dónde termina.
+    write(sock, id_str, strlen(id_str) + 1); //Enviar ID del mensaje al cliente, terminado en '\0' para que el cliente sepa dónde termina.
 
     //Copiar datos del receptor antes de soltar el mutex
     char receiver_ip[16];
@@ -416,22 +409,22 @@ int send_message_to_client(const char *ip, int port,
     return 0;
 }
 
-void handle_sendattach(int socket) {
+void handle_sendattach(int sock) {
     char sender_name[MAX_NAME];
     char dest_name[MAX_NAME];
     char message[MAX_MSG];
     char filename[MAX_FILE];
 
     //Orden: remitente, destinatario, mensaje 
-    if (read_str(socket, sender_name, MAX_NAME) < 0) return;
-    if (read_str(socket, dest_name,   MAX_NAME) < 0) return;
-    if (read_str(socket, message,     MAX_MSG)  < 0) return;
-    if (read_str(socket, filename,     MAX_FILE)  < 0) return;
+    if (read_str(sock, sender_name, MAX_NAME) < 0) return;
+    if (read_str(sock, dest_name,   MAX_NAME) < 0) return;
+    if (read_str(sock, message,     MAX_MSG)  < 0) return;
+    if (read_str(sock, filename,     MAX_FILE)  < 0) return;
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
 
-    static unsigned int global_msg_id_attach = 0; //Contador global para asignar IDs únicos a los mensajes enviados. Se incrementa cada vez que se envía un mensaje, y si llega a 0 (desbordamiento), se reinicia a 1 para evitar usar el ID 0, que podría usarse para indicar ausencia de mensaje o error.
+    static unsigned int global_msg_id = 0; //Contador global para asignar IDs únicos a los mensajes enviados. Se incrementa cada vez que se envía un mensaje, y si llega a 0 (desbordamiento), se reinicia a 1 para evitar usar el ID 0, que podría usarse para indicar ausencia de mensaje o error.
 
     User *receiver = user_list;
     while (receiver != NULL && strcmp(receiver->name, dest_name) != 0)
@@ -442,15 +435,16 @@ void handle_sendattach(int socket) {
            !(strcmp(sender->name, sender_name) == 0 && sender->status == 1))
         sender = sender->next;
 
+    // Si el remitente o el destinatario no existen o están desconectados, error
     if (receiver == NULL || sender == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> SENDATTACH %s FAIL\n", sender_name);
         return;
     }
-    global_msg_id_attach++; // Mensaje 1 de Ana a Luis, mensaje 2 de Luis a Ana, mensaje 3 de Ana a Carlos, etc.
-    if (global_msg_id_attach == 0) global_msg_id_attach = 1;
+    global_msg_id++; // Mensaje 1 de Ana a Luis, mensaje 2 de Luis a Ana, mensaje 3 de Ana a Carlos, etc.
+    if (global_msg_id == 0) global_msg_id = 1;
 
     //Como se envía el nombre del el recibidor, el remitente, el mensaje y luego todos los datos del adjunto, el proceso de guardado del mensaje pendiente es similar al de handle_send,
     //pero se redibiran todos los bytes del archivo en 1024 bytes de vez
@@ -458,11 +452,11 @@ void handle_sendattach(int socket) {
     if (new_msg == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 2;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> SENDATTACH %s FAIL\n", sender_name);
         return;
     }
-    new_msg->id   = global_msg_id_attach; //Asignar id de mensaje global único
+    new_msg->id   = global_msg_id; //Asignar id de mensaje global único
     new_msg->next = NULL; //siguiente mensaje por escribir todavía no existe, se asigna NULL
     strncpy(new_msg->sender,  sender_name, MAX_NAME); //se completan los campos
     strncpy(new_msg->content, message,     MAX_MSG);
@@ -478,56 +472,78 @@ void handle_sendattach(int socket) {
 
     //Responder OK + ID al remitente
     response = 0;
-    write(socket, &response, 1); //Respuesta de OK
+    write(sock, &response, 1); //Respuesta de OK
     char id_str[16];
-    snprintf(id_str, sizeof(id_str), "%u", global_msg_id_attach); //convertir mensaje a string
-    write(socket, id_str, strlen(id_str) + 1); //Enviar ID del mensaje al cliente, terminado en '\0' para que el cliente sepa dónde termina.
+    snprintf(id_str, sizeof(id_str), "%u", global_msg_id); //convertir mensaje a string
+    write(sock, id_str, strlen(id_str) + 1); //Enviar ID del mensaje al cliente, terminado en '\0' para que el cliente sepa dónde termina.
 
-    //Copiar datos del receptor antes de soltar el mutex
+    //Copiar datos de el que envia y el que recibe antes de soltar el mutex
     char receiver_ip[16];
-    int  receiver_port   = receiver->port;
+    char sender_ip[16];
+    int receiver_port = receiver->port;
+    int sender_port = sender->port;
     int  receiver_status = receiver->status;
     unsigned int msg_id_saved = new_msg->id;
+
     strncpy(receiver_ip, receiver->ip, 16);
     receiver_ip[15] = '\0';
+    strncpy(sender_ip, sender->ip, 16);
+    sender_ip[15] = '\0';
     char receiver_name[MAX_NAME];
     strncpy(receiver_name, receiver->name, MAX_NAME);
 
+    pthread_mutex_unlock(&mutex);
+    
+    // Intentamos enviar al destinatario
     if (receiver_status == 1) { //Si el cliente está ya conectado, se envia de inmediato
-        pthread_mutex_unlock(&mutex);
 
-        int send_result = send_attach_to_client(receiver_ip, receiver_port,
-                                                 sender_name, msg_id_saved, message,filename); //Enviamos mensaje al cliente receptor
-        pthread_mutex_lock(&mutex);
+        int send_result = send_attach_to_client(receiver_ip, receiver_port, sender_name, msg_id_saved, message, filename); //Enviamos mensaje al cliente receptor
 
         if (send_result == 0) { //Si el mensaje se ha enviado correctamente, lo eliminamos de la lista de pendientes del receptor
+            // Borramos el mensaje de la lista de pendientes del receptor si se envió correctamente
+            pthread_mutex_lock(&mutex);
             User *recv2 = user_list;
-            while (recv2 != NULL && strcmp(recv2->name, receiver_name) != 0)
+            while (recv2 != NULL && strcmp(recv2->name, dest_name) != 0){
                 recv2 = recv2->next;
-
+            }
             if (recv2 != NULL) {
                 Message *cur = recv2->pending_msgs, *prev = NULL;
                 while (cur != NULL) {
                     if (cur->id == msg_id_saved) {
                         if (prev == NULL) recv2->pending_msgs = cur->next;
-                        else              prev->next           = cur->next;
+                        else prev->next = cur->next;
                         free(cur);
                         break;
                     }
-                    prev = cur;
-                    cur  = cur->next;
+                    prev = cur; cur = cur->next;
                 }
+            }
+            pthread_mutex_unlock(&mutex);
+
+            // Ahora notificamos al remitente
+            int notify_sock = socket(AF_INET, SOCK_STREAM, 0);
+            if (notify_sock >= 0) {
+                struct sockaddr_in notify_addr;
+                memset(&notify_addr, 0, sizeof(notify_addr));
+                notify_addr.sin_family = AF_INET;
+                notify_addr.sin_port = htons(sender_port);
+                inet_pton(AF_INET, sender_ip, &notify_addr.sin_addr);
+
+                if (connect(notify_sock, (struct sockaddr *)&notify_addr, sizeof(notify_addr)) == 0) {
+                    write(notify_sock, "SEND_MESS_ATTACH_ACK", strlen("SEND_MESS_ATTACH_ACK") + 1);
+                    char id_confirm[32];
+                    snprintf(id_confirm, sizeof(id_confirm), "%u", msg_id_saved);
+                    write(notify_sock, id_confirm, strlen(id_confirm) + 1);
+                    write(notify_sock, filename, strlen(filename) + 1);
+                }
+                close(notify_sock);
             }
         }
     }
 
-
-    pthread_mutex_unlock(&mutex);
-    printf("s> SEND MESSAGE %u FROM %s TO %s\n", msg_id_saved, sender_name, receiver_name);
+    printf("s> SEND MESSAGE %u FROM %s TO %s ATTACHED %s\n", msg_id_saved, sender_name, receiver_name, filename);
 }
     
-
-
 
 int send_attach_to_client(const char *ip, int port,
                             const char *sender, unsigned int msg_id,
@@ -548,7 +564,7 @@ int send_attach_to_client(const char *ip, int port,
 
     // Protocolo que listen_thread espera:
     // "SEND_ATTACH\0" + sender\0 + id\0 + message\0  + filename\0
-    write(sock, "SEND_ATTACH", strlen("SEND_ATTACH") + 1);
+    write(sock, "SEND MESSAGE ATTACH", strlen("SEND MESSAGE ATTACH") + 1);
     write(sock, sender,  strlen(sender)  + 1);
     char id_str[32];
     snprintf(id_str, sizeof(id_str), "%u", msg_id);
@@ -560,13 +576,13 @@ int send_attach_to_client(const char *ip, int port,
                             }
 
 //Quit 
-void handle_quit(int socket) {
+void handle_quit(int sock) {
     char name[MAX_NAME];
     char port_str[16];
     uint8_t response;
 
-    if (read_str(socket, name,     MAX_NAME)        < 0) return;
-    if (read_str(socket, port_str, sizeof(port_str)) < 0) return;
+    if (read_str(sock, name,     MAX_NAME)        < 0) return;
+    if (read_str(sock, port_str, sizeof(port_str)) < 0) return;
 
     pthread_mutex_lock(&mutex);
 
@@ -577,7 +593,7 @@ void handle_quit(int socket) {
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
         response = 1;
-        write(socket, &response, 1);
+        write(sock, &response, 1);
         printf("s> QUIT %s FAIL\n", name);
         return;
     }
@@ -590,6 +606,6 @@ void handle_quit(int socket) {
     pthread_mutex_unlock(&mutex);
 
     response = 0;
-    write(socket, &response, 1);
+    write(sock, &response, 1);
     printf("s> QUIT %s OK\n", name);
 }
