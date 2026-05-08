@@ -266,7 +266,7 @@ class client:
                         name += c
                     parts = name.decode().split("::")
                     if len(parts) == 3:
-                        uname, uip, uport = parts[0], parts[1], parts[2]
+                        uname, uip, uport = parts[0].strip(), parts[1].strip(), parts[2].strip()
                         client._connected_users[uname] = (uip, int(uport))
             s.close() 
 
@@ -387,16 +387,16 @@ class client:
                         c = connection.recv(1)
                         if c == b'\0': break
                         msg_id += c
-                    filename = b""
-                    while True:
-                        c = connection.recv(1)
-                        if c == b'\0': break
-                        filename += c
                     message = b""
                     while True:
                         c = connection.recv(1)
                         if c == b'\0': break
                         message += c
+                    filename = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        filename += c
 
                     print(f"\nc> SENDATTACH MESSAGE {sender.decode()} {msg_id.decode()} {filename.decode()} {message.decode()} OK")   
                     print("c> ", end="", flush=True)
