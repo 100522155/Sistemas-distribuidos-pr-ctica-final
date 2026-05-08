@@ -44,6 +44,7 @@ void handle_register(int socket) {
             pthread_mutex_unlock(&mutex);
             response = 1;
             write(socket, &response, 1); // Usuario ya existe
+            printf("s> REGISTER %s FAIL\n", name);
             return;
         }
         curr = curr->next;
@@ -69,7 +70,7 @@ void handle_register(int socket) {
     pthread_mutex_unlock(&mutex);
     response = 0;
     write(socket, &response, 1);
-    printf("[REGISTER] Usuario '%s' registrado.\n", name);
+    printf("s> REGISTER %s OK\n", name);
 }
 
 void handle_unregister(int socket) {
@@ -91,6 +92,7 @@ void handle_unregister(int socket) {
         pthread_mutex_unlock(&mutex);
         response = 1;
         write(socket, &response, 1);
+        printf("s> UNREGISTER %s FAIL\n", name);
         return;
     }
 
@@ -111,7 +113,7 @@ void handle_unregister(int socket) {
     pthread_mutex_unlock(&mutex);
     response = 0;
     write(socket, &response, 1);
-    printf("[UNREGISTER] Usuario '%s' eliminado.\n", name);
+    printf("s> UNREGISTER %s OK\n", name);
 }
 
 //Conexion de un usuario, se actualiza su estado a conectado y se le entregan los mensajes pendientes.
@@ -137,6 +139,7 @@ void handle_connect(int socket, char *client_ip) {
         pthread_mutex_unlock(&mutex);
         response = 1;
         write(socket, &response, 1);
+        printf("s> CONNECT %s FAIL\n", name);
         return;
     }
     // Si el usuario ya está conectado, no se permite conectar de nuevo (no se actualiza su IP ni puerto) y se responde con error.
@@ -144,6 +147,7 @@ void handle_connect(int socket, char *client_ip) {
         pthread_mutex_unlock(&mutex);
         response = 2;
         write(socket, &response, 1);
+        printf("s> CONNECT %s FAIL\n", name);
         return;
     }
     //Asignamos campos al usuario (en register solo se crea y ya)
@@ -170,16 +174,16 @@ void handle_connect(int socket, char *client_ip) {
                                        msg->sender, msg->id, msg->content); //Asignamos los datos para enviar el mensaje al cliente
         }
         if (r == 0)
-            printf("[CONNECT] Mensaje %u entregado a '%s'.\n", msg->id, name);
+            printf("s> CONNECT %s OK\n", name);
         else
-            printf("[CONNECT] Error entregando mensaje %u a '%s'.\n", msg->id, name);
+            printf("s> CONNECT %s FAIL\n", name);
         free(msg);
         msg = nxt;
     }
 
     response = 0;
     write(socket, &response, 1);
-    printf("[CONNECT] '%s' conectado desde %s:%d.\n", name, client_ip, client_port);
+    printf("s> CONNECT %s OK\n", name);
 }
 
 void handle_disconnect(int socket, char *client_ip) {
@@ -200,12 +204,14 @@ void handle_disconnect(int socket, char *client_ip) {
         pthread_mutex_unlock(&mutex);
         response = 1;
         write(socket, &response, 1);
+        printf("s> DISCONNECT %s FAIL\n", name);
         return;
     }
     if (curr->status == 0) {
         pthread_mutex_unlock(&mutex);
         response = 2;
         write(socket, &response, 1);
+        printf("s> DISCONNECT %s FAIL\n", name);
         return;
     }
 
@@ -218,7 +224,7 @@ void handle_disconnect(int socket, char *client_ip) {
     pthread_mutex_unlock(&mutex);
     response = 0;
     write(socket, &response, 1);
-    printf("[DISCONNECT] Usuario '%s' desconectado.\n", name);
+    printf("s> DISCONNECT %s OK\n", name);
 }
 
 void handle_users(int socket) { 
@@ -237,6 +243,7 @@ void handle_users(int socket) {
         pthread_mutex_unlock(&mutex);
         uint8_t r = 1;
         write(socket, &r, 1);
+        printf("s> USERS %s FAIL\n", name);
         return;
     }
     // Contar usuarios conectados
@@ -269,6 +276,7 @@ void handle_users(int socket) {
 
 
     pthread_mutex_unlock(&mutex);
+    printf("s> USERS %s OK\n", name);
 }
 
 void handle_send(int socket) {
@@ -299,6 +307,7 @@ void handle_send(int socket) {
         pthread_mutex_unlock(&mutex);
         response = 1;
         write(socket, &response, 1);
+        printf("s> SEND %s FAIL\n", sender);
         return;
     }
 
@@ -310,6 +319,7 @@ void handle_send(int socket) {
         pthread_mutex_unlock(&mutex);
         response = 2;
         write(socket, &response, 1);
+        
         return;
     }
     new_msg->id   = global_msg_id; //Asignar id de mensaje global único
@@ -436,6 +446,7 @@ void handle_sendattach(int socket) {
         pthread_mutex_unlock(&mutex);
         response = 1;
         write(socket, &response, 1);
+        printf("s> SENDATTACH %s FAIL\n", sender_name);
         return;
     }
     global_msg_id_attach++; // Mensaje 1 de Ana a Luis, mensaje 2 de Luis a Ana, mensaje 3 de Ana a Carlos, etc.
@@ -448,6 +459,7 @@ void handle_sendattach(int socket) {
         pthread_mutex_unlock(&mutex);
         response = 2;
         write(socket, &response, 1);
+        printf("s> SENDATTACH %s FAIL\n", sender_name);
         return;
     }
     new_msg->id   = global_msg_id_attach; //Asignar id de mensaje global único
@@ -551,6 +563,7 @@ int send_attach_to_client(const char *ip, int port,
 void handle_quit(int socket) {
     char name[MAX_NAME];
     char port_str[16];
+    uint8_t response;
 
     if (read_str(socket, name,     MAX_NAME)        < 0) return;
     if (read_str(socket, port_str, sizeof(port_str)) < 0) return;
@@ -563,15 +576,20 @@ void handle_quit(int socket) {
 
     if (curr == NULL) {
         pthread_mutex_unlock(&mutex);
-        uint8_t r = 1;
-        write(socket, &r, 1);
+        response = 1;
+        write(socket, &response, 1);
+        printf("s> QUIT %s FAIL\n", name);
         return;
     }
 
+    /* Marcamos como offline y limpiamos datos de red */
     curr->status = 0; //Limpiamos los datos del usuario, dejando el nombre para que siga registrado pero sin datos de conexión ni mensajes pendientes. Si el usuario se conecta de nuevo, se le asignarán nuevos datos y mensajes pendientes vacía.
     memset(curr->ip, 0, sizeof(curr->ip));
     curr->port = 0;
 
     pthread_mutex_unlock(&mutex);
-    printf("[QUIT] Usuario '%s' cerró la sesión.\n", name);
+
+    response = 0;
+    write(socket, &response, 1);
+    printf("s> QUIT %s OK\n", name);
 }
