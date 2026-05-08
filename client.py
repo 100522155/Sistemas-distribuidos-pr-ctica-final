@@ -411,7 +411,6 @@ class client:
                         filename += c
                     filename = filename.decode()
 
-                    import os
                     if os.path.exists(filename):
                         size = os.path.getsize(filename)
                         connection.send(bytes([0]))                          # OK
@@ -421,8 +420,11 @@ class client:
                                 data = f.read(4096)
                                 if not data: break
                                 connection.sendall(data)
+                                print(data)
                     else:
-                        connection.send(bytes([1]))                          # FAIL
+                        connection.send(bytes([1])) 
+                    print("El getfile funciona")
+
 
             except Exception as e:
                 if client._listening:
