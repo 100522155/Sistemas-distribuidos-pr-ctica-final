@@ -4,6 +4,7 @@ import socket
 import struct
 import threading
 import os
+import zeep
 
 class client:
 
@@ -19,6 +20,18 @@ class client:
     _listen_thread = None
     _listen_socket = None
     _listening = False
+    _ws_client = None
+
+    @staticmethod
+    def get_ws_client():
+        # Creamos el cliente del servicio web una sola vez (Singleton)
+        if client._ws_client is None:
+            try:
+                wsdl_url = "http://localhost:8000/?wsdl"
+                client._ws_client = zeep.Client(wsdl=wsdl_url)
+            except Exception as e:
+                print(f"Error conectando al Servicio Web: {e}")
+        return client._ws_client    
 
     @staticmethod
     def register(user): #Crear un socket por cada operacion que realice el cliente, para evitar problemas de concurrencia al compartir un mismo socket entre varias operaciones. Cada vez que el cliente realiza una operación (como REGISTER, UNREGISTER, CONNECT, etc.), se crea un nuevo socket para esa operación específica. Esto permite que cada operación se maneje de forma independiente y evita posibles conflictos o bloqueos que podrían surgir al compartir un mismo socket entre múltiples operaciones concurrentes.
@@ -166,6 +179,11 @@ class client:
     @staticmethod
     def send(user, message):
         try:
+            # Normalizamos el mensaje usando el servicio web
+            ws = client.get_ws_client()
+            if ws:
+                message = ws.service.normalizar_mensaje(message)
+
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
             client._socket.send(b"SEND\0") #operación 5: SEND
@@ -192,6 +210,11 @@ class client:
     @staticmethod
     def sendAttach(user, file, message):
         try:
+            # Normalizamos el mensaje usando el servicio web
+            ws = client.get_ws_client()
+            if ws:
+                message = ws.service.normalizar_mensaje(message)
+
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
             client._socket.send(b"SENDATTACH\0")
