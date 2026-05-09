@@ -2,13 +2,15 @@ from spyne import Application, ServiceBase, Unicode, rpc
 from spyne.protocol.soap import Soap11
 from spyne.server.wsgi import WsgiApplication
 from wsgiref.simple_server import make_server
-import logging
 
 class MensajeService(ServiceBase):
+    """ Servicio que normaliza un mensaje.
+    Elimina los espacios en blanco repetidos de un texto."""
+
     @rpc(Unicode, _returns=Unicode)
     def normalizar_mensaje(ctx, mensaje):
-        # Lógica: split() sin argumentos elimina todos los espacios en blanco 
-        # (espacios, tabs, etc) y join() los une con un solo espacio.
+        # Primero utilizamos split() para dividir el mensaje en palabras y elimina los espacios en blanco 
+        # que haya antes o despues de la palabra y luego unimos las palabras con un solo espacio
         palabras = mensaje.split()
         resultado = " ".join(palabras)
         print(f"[WS] Transformado: '{mensaje}' -> '{resultado}'")
@@ -23,7 +25,6 @@ application = Application(
 )
 
 if __name__ == '__main__':
-    # Usamos el puerto 8000 como en vuestro ejemplo
     host = '127.0.0.1'
     port = 8000
     wsgi_app = WsgiApplication(application)
