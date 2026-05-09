@@ -139,7 +139,7 @@ class client:
             return client.RC.ERROR
 
     @staticmethod
-    def users():
+    def users(verprint=True):
         try:
             # Enviar operación 4 y nombre (256 bytes)
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -163,7 +163,8 @@ class client:
                     count_str += c
 
                 count = int(count_str.decode())
-                print(f"CONNECTED USERS ({count} users connected) OK")
+                if verprint:
+                    print(f"CONNECTED USERS ({count} users connected) OK")
 
                 # Limpiamos los usuarios conocidos antes de actualizar
                 client._connected_users = {}
@@ -187,20 +188,25 @@ class client:
                         client._connected_users[uname] = (uip, uport)
                         
                         # Imprimir solo el nombre (o la info completa según prefieras)
-                        print(f"  {uname}")
+                        if verprint:    
+                            print(f"  {uname}")
                     else:
                         # Por si el servidor solo envía el nombre (compatibilidad)
-                        print(f"  {full_info}")
+                        if verprint:
+                            print(f"  {full_info}")
 
             elif res == 1:
-                print("CONNECTED USERS FAIL, USER IS NOT CONNECTED")
+                if verprint:
+                    print("CONNECTED USERS FAIL, USER IS NOT CONNECTED")
             else:
-                print("CONNECTED USERS FAIL")
+                if verprint:
+                    print("CONNECTED USERS FAIL")
             client._socket.close()
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
             
         except Exception as e:
-            print(f"Error en USERS: {e}")
+            if verprint:
+                print(f"Error en USERS: {e}")
             return client.RC.ERROR
 
     @staticmethod
@@ -257,23 +263,6 @@ class client:
             client._socket.send(user.encode('utf-8') + b'\0')
             client._socket.send(message.encode('utf-8') + b'\0')
             client._socket.send(file.encode('utf-8') + b'\0')
-            
-            # Enviamos el contenido del fichero
-            # Obtenemos el tamaño para que el servidor sepa cuánto leer
-            file_size = os.path.getsize(file)
-            # Enviamos el tamaño como string + \0 (opcional según tu servidor, pero recomendado)
-            # client._socket.send(str(file_size).encode('utf-8') + b'\0') 
-
-            with open(file, 'rb') as f:
-                while True:
-                    data = f.read(1024)
-                    if not data:
-                        break  # Fin del archivo
-                    client._socket.sendall(data)
-            
-            # Indicamos al servidor que hemos terminado de enviar el chorro de bytes
-            # shutdown con SHUT_WR envía un paquete FIN al servidor sin cerrar el socket de lectura
-            client._socket.shutdown(socket.SHUT_WR)
 
             # Esperamos la respuesta del servidor (0, 1 o 2)
             res_raw = client._socket.recv(1)
@@ -288,19 +277,19 @@ class client:
                     c = client._socket.recv(1)
                     if not c or c == b'\0': break
                     id_str += c
-                print(f"SEND OK - MESSAGE {id_str.decode()}")
+                print(f"SENDATTACH OK - MESSAGE {id_str.decode()}")
                 client._socket.close()
                 return client.RC.OK
             elif res == 1: 
-                print("SEND FAIL, USER DOES NOT EXIST")
+                print("SENDATTACH FAIL, USER DOES NOT EXIST")
             else:          
-                print("SEND FAIL")
+                print("SENDATTACH FAIL")
 
             client._socket.close()            
             return client.RC.ERROR
 
         except Exception as e:
-            print(f"Error en SEND: {e}")
+            print(f"Error en SENDATTACH: {e}")
             return client.RC.ERROR
     
     @staticmethod
@@ -308,11 +297,11 @@ class client:
         try:
             # Si no tenemos los datos del usuario, llamamos a USERS automáticamente
             if username not in client._connected_users:
-                client.users()  
+                client.users(verprint=False)  
             
             # Si después de llamar a USERS sigue sin estar, es que no está conectado
             if username not in client._connected_users:
-                print(f"c> GET_FILE FAIL")
+                print(f"c> FILE TRANSFER FAILED, user not connected.")
                 return client.RC.ERROR
             
             # Obtener IP y puerto (Corregido para coincidir con la tupla de users())
@@ -323,43 +312,35 @@ class client:
             try:
                 s.connect((sender_ip, sender_port))
             except Exception as e:
-                print(f"c> GET_FILE FAIL")
+                print(f"c> FILE TRANSFER FAILED, user not connected.")
                 return client.RC.ERROR
             
             # Protocolo GETFILE
-            s.send(b"GETFILE\0")
+            s.send(b"GET_FILE\0")
+            # Enviar el nombre del solicitante
+            my_name = getattr(client, '_cur_user', "anon")
+            s.send(my_name.encode('utf-8') + b'\0')
             s.send(remote_filename.encode('utf-8') + b'\0')
             
             # Leer respuesta (0 = OK, 1 = Error)
             response = s.recv(1)
             if not response or response[0] != 0:
-                print("c> GET_FILE FAIL")
+                print("c> FILE TRANSFER FAILED, user not connected.")
                 s.close()
                 return client.RC.ERROR
             
-            # Leer tamaño del archivo
-            size_str = b""
-            while True:
-                c = s.recv(1)
-                if not c or c == b'\0': 
-                    break
-                size_str += c
-            
-            file_size = int(size_str.decode())
-            
-            # Recibir contenido
+            # Recibimos hasta que el otro cierre la conexión
             received = 0
             try:
                 with open(local_filename, "wb") as f:
-                    while received < file_size:
-                        chunk_size = min(4096, file_size - received)
-                        data = s.recv(chunk_size)
+                    while True:
+                        data = s.recv(4096)
                         if not data:
                             break
                         f.write(data)
                         received += len(data)
             except Exception as e:
-                print(f"c> GET_FILE FAIL")
+                print(f"c> FILE TRANSFER FAILED")
                 s.close()
                 if os.path.exists(local_filename):
                     os.remove(local_filename)
@@ -367,18 +348,18 @@ class client:
             
             s.close()
             
-            # Verificación final
-            if received == file_size:
-                print("GET_FILE OK")
+            # Éxito si recibimos algo
+            if received > 0:  
+                print("c> GETFILE OK")
                 return client.RC.OK
             else:
                 if os.path.exists(local_filename):
                     os.remove(local_filename)
-                print("c> GET_FILE FAIL")
+                print("c> FILE TRANSFER FAILED")
                 return client.RC.ERROR
                 
         except Exception as e:
-            print("c> GET_FILE FAIL")
+            print("c> FILE TRANSFER FAILED")
             return client.RC.ERROR
 
     @staticmethod
@@ -415,12 +396,11 @@ class client:
                         if c == b'\0': break
                         message += c
                     
-                    print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()}")
-                    print(f"   {message.decode()}")
+                    print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()} {message.decode()} END")
                     print("c> ", end="", flush=True)
 
                 # Mensaje con adjunto
-                elif op == "SEND MESSAGE ATTACH":
+                elif op == "SEND_MESSAGE_ATTACH":
                     sender = b""
                     while True:
                         c = connection.recv(1)
@@ -445,11 +425,10 @@ class client:
                         if c == b'\0': break
                         filename += c
 
-                    print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()} ATTACHED {filename.decode()}")
-                    print(f"   {message.decode()}")
+                    print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()} {message.decode()} END FILE {filename.decode()}")
                     print("c> ", end="", flush=True)
 
-                # Confirmación de entrega
+                # Confirmación de entrega de mensaje con adjunto
                 elif op == "SEND_MESS_ATTACH_ACK":
                     msg_id = b""
                     while True:
@@ -463,11 +442,30 @@ class client:
                         if c == b'\0': break
                         filename += c
 
-                    print(f"\ns> SEND MESSAGE {msg_id.decode()} ATTACHED {filename.decode()} OK")
+                    print(f"\ns> SENDATTACH MESSAGE {msg_id.decode()} {filename.decode()} OK")
+                    print("c> ", end="", flush=True)
+                
+                # Confirmación de entrega de mensaje simple
+                elif op == "SEND_MESS_ACK":
+                    msg_id = b""
+                    while True:
+                        c = connection.recv(1)
+                        if c == b'\0': break
+                        msg_id += c
+                    print(f"\ns> SEND MESSAGE {msg_id.decode()} OK")
                     print("c> ", end="", flush=True)
 
                 # Transferencia P2P
-                elif op == "GETFILE":
+                elif op == "GET_FILE":
+
+                    # Leer nombre del solicitante
+                    requester = b""
+                    while True:
+                        c = connection.recv(1)
+                        if not c or c == b'\0': break
+                        requester += c
+
+                    # Leer nombre del fichero
                     filename_b = b""
                     while True:
                         c = connection.recv(1)
@@ -475,10 +473,9 @@ class client:
                         filename_b += c
                     filename = filename_b.decode()
 
+                    # Verificar existencia
                     if os.path.exists(filename):
-                        size = os.path.getsize(filename)
-                        connection.send(bytes([0])) # Código 0 = Éxito
-                        connection.send(str(size).encode() + b'\0') # Tamaño
+                        connection.send(bytes([0]))
                         with open(filename, 'rb') as f:
                             while True:
                                 data = f.read(4096)
