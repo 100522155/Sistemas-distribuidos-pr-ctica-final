@@ -10,12 +10,32 @@
 #include <sys/stat.h>
 #include <arpa/inet.h>
 #include "claves.h"
+#include "log_rpc.h"
 
-#define PORT 5000 //Esto hay que quitarlo
 #define MAX_NAME 256
 
 User *user_list = NULL;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Función auxiliar para llamar al servicio RPC
+void call_rpc_log(char *user, char *op, char *filename) {
+    char *server_ip = getenv("LOG_RPC_IP");
+    if (server_ip == NULL) return; // Si no hay variable de entorno, no hace nada
+
+    CLIENT *clnt = clnt_create(server_ip, LOG_PROG, LOG_VERS, "tcp");
+    if (clnt == NULL) {
+        return;
+    }
+
+    log_request req;
+    req.username = user;
+    req.operation = op;
+    req.filename = (filename != NULL) ? filename : "";
+
+    int *result = print_log_1(&req, clnt);
+
+    clnt_destroy(clnt);
+}
 
 // Lee una cadena terminada en '\0' desde el socket. Devuelve la longitud (sin contar '\0') o -1 en error.
 static int read_str(int sock, char *buf, int maxlen) { // read_str lee el byte desde el sock y guarda en el buffer un byte a la vez hasta encontrar un '\0' o alcanzar maxlen-1. Devuelve la longitud de la cadena leída (sin contar el '\0') o -1 en caso de error.
@@ -34,6 +54,8 @@ static int read_str(int sock, char *buf, int maxlen) { // read_str lee el byte d
 void handle_register(int sock) {
     char name[MAX_NAME];
     if (read_str(sock, name, MAX_NAME) < 0) return;
+
+    call_rpc_log(name, "REGISTER", NULL);
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -76,6 +98,8 @@ void handle_register(int sock) {
 void handle_unregister(int sock) {
     char name[MAX_NAME];
     if (read_str(sock, name, MAX_NAME) < 0) return;
+
+    call_rpc_log(name, "UNREGISTER", NULL);
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -125,6 +149,8 @@ void handle_connect(int sock, char *client_ip) {
     if (read_str(sock, name,     MAX_NAME)        < 0) return; //leer hasta '\0' y guardar el nombre
     if (read_str(sock, port_str, sizeof(port_str)) < 0) return; //leer hasta '\0' y guardar el puerto como string
     int client_port = atoi(port_str);
+
+    call_rpc_log(name, "CONNECT", NULL);
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -186,6 +212,8 @@ void handle_disconnect(int sock, char *client_ip) {
     /* Puerto llega como string */
     if (read_str(sock, name,     MAX_NAME)        < 0) return;
 
+    call_rpc_log(name, "DISCONNECT", NULL);
+
     uint8_t response;
     pthread_mutex_lock(&mutex);
 
@@ -223,6 +251,8 @@ void handle_disconnect(int sock, char *client_ip) {
 void handle_users(int sock) { 
     char name[MAX_NAME];
     if (read_str(sock, name, MAX_NAME) < 0) return; //Leemos nombre de usuario 
+
+    call_rpc_log(name, "USERS", NULL);
 
     pthread_mutex_lock(&mutex);
 
@@ -281,6 +311,8 @@ void handle_send(int sock) {
     if (read_str(sock, sender_name, MAX_NAME) < 0) return;
     if (read_str(sock, dest_name,   MAX_NAME) < 0) return;
     if (read_str(sock, message,     MAX_MSG)  < 0) return;
+
+    call_rpc_log(sender_name, "SEND", NULL);
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -420,6 +452,8 @@ void handle_sendattach(int sock) {
     if (read_str(sock, dest_name,   MAX_NAME) < 0) return;
     if (read_str(sock, message,     MAX_MSG)  < 0) return;
     if (read_str(sock, filename,     MAX_FILE)  < 0) return;
+
+    call_rpc_log(sender_name, "SENDATTACH", filename);
 
     uint8_t response;
     pthread_mutex_lock(&mutex);
@@ -584,6 +618,8 @@ void handle_quit(int sock) {
     if (read_str(sock, name,     MAX_NAME)        < 0) return;
     if (read_str(sock, port_str, sizeof(port_str)) < 0) return;
 
+    call_rpc_log(name, "QUIT", NULL);
+    
     pthread_mutex_lock(&mutex);
 
     User *curr = user_list;

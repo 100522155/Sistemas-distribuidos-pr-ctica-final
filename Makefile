@@ -1,16 +1,27 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -pthread
+CFLAGS = -Wall -Wextra -pthread -I/usr/include/tirpc
+LDLIBS = -ltirpc
 
-all: servidor
+# Ficheros generados por rpcgen
+RPC_GEN = log_rpc_clnt.c log_rpc_svc.c log_rpc_xdr.c log_rpc.h
 
-servidor: servidor.o claves.o
-	$(CC) $(CFLAGS) -o servidor servidor.o claves.o
+all: servidor log_rpc_server
 
-servidor.o: servidor.c claves.h
-	$(CC) $(CFLAGS) -c servidor.c
+# Regla para rpcgen
+$(RPC_GEN): log_rpc.x
+	rpcgen -C log_rpc.x
 
-claves.o: claves.c claves.h
-	$(CC) $(CFLAGS) -c claves.c
+# Servidor principal (ahora incluye el cliente RPC)
+servidor: servidor.o claves.o log_rpc_clnt.o log_rpc_xdr.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+# Servidor RPC de logs
+log_rpc_server: log_rpc_server.o log_rpc_svc.o log_rpc_xdr.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+servidor.o: servidor.c claves.h log_rpc.h
+claves.o: claves.c claves.h log_rpc.h
+log_rpc_server.o: log_rpc_server.c log_rpc.h
 
 clean:
-	rm -f *.o servidor
+	rm -f *.o servidor log_rpc_server $(RPC_GEN)
