@@ -17,11 +17,11 @@ OBJS_RPC = log_rpc_server.o log_rpc_svc.o log_rpc_xdr.o
 
 all: $(RPC_GEN) $(BIN_SERVER) $(BIN_RPC_SERVER)
 
-# Generar stubs RPC
+# Generar archivos RPC
 $(RPC_GEN): log_rpc.x
 	rpcgen -C log_rpc.x
 
-# Servidor principal (mensajería)
+# Servidor principal de mensajería
 $(BIN_SERVER): $(OBJS_SERVER)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
@@ -29,7 +29,7 @@ $(BIN_SERVER): $(OBJS_SERVER)
 $(BIN_RPC_SERVER): $(OBJS_RPC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-# Regla implícita para compilar .c -> .o
+# Compilación de archivos
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 

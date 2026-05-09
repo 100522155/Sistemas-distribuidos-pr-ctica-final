@@ -5,7 +5,7 @@
 int * print_log_1_svc(log_request *argp, struct svc_req *rqstp) {
     static int result = 0;
 
-    // Imprimimos "usuario OPERACION" en la misma línea
+    // Imprimimos el nombre de usuario y la operación realizada
     printf("%s %s", argp->username, argp->operation);
     
     // Si es SENDATTACH, añadimos el nombre del fichero a la misma línea
@@ -13,7 +13,7 @@ int * print_log_1_svc(log_request *argp, struct svc_req *rqstp) {
         printf(" %s", argp->filename);
     }
 
-    // Salto de línea final para que la siguiente petición empiece abajo
+    // Añadimos un salto de línea final para que la siguiente petición empiece abajo
     printf("\n");
 
     return &result;
