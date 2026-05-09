@@ -7,24 +7,31 @@ import os
 import zeep
 
 class client:
+    """Esta clase corresponde con el cliente del sistema de mensajería. 
+    Permite registrar usuarios, conectarse, enviar mensajes simples o con adjuntos,
+    recibir mensajes, listar usuarios conectados y transferir ficheros P2P."""
 
     class RC(Enum):
+        """Códigos de retorno para las operaciones."""
+
         OK         = 0
         ERROR      = 1
         USER_ERROR = 2
 
-    _connected_users = {} #Lista de usuarios que tiene este que están conectados
-    _server = None
-    _port   = -1
-    _socket = None
-    _listen_thread = None
-    _listen_socket = None
-    _listening = False
-    _ws_client = None
+    # Atributos estáticos
+    _connected_users = {} # Diccionario: {nombre_usuario: (ip, puerto)} de usuarios conectados
+    _server = None  # IP del servidor de mensajería
+    _port   = -1    # Puerto del servidor de mensajería
+    _socket = None  # Socket temporal para operaciones puntuales
+    _listen_thread = None   # Hilo de escucha para recibir mensajes del servidor y de otros clientes
+    _listen_socket = None   # Socket de escucha (para conexiones entrantes del servidor y P2P)
+    _listening = False  # Flag que indica si el hilo de escucha está activo
+    _ws_client = None   # Cliente para el servicio web de normalización de mensajes
 
     @staticmethod
     def get_ws_client():
-        # Creamos el cliente del servicio web una sola vez (Singleton)
+        """Obtiene el cliente del servicio web. Si no existe, lo crea."""
+
         if client._ws_client is None:
             try:
                 wsdl_url = "http://localhost:8000/?wsdl"
@@ -34,8 +41,13 @@ class client:
         return client._ws_client    
 
     @staticmethod
-    def register(user): #Crear un socket por cada operacion que realice el cliente, para evitar problemas de concurrencia al compartir un mismo socket entre varias operaciones. Cada vez que el cliente realiza una operación (como REGISTER, UNREGISTER, CONNECT, etc.), se crea un nuevo socket para esa operación específica. Esto permite que cada operación se maneje de forma independiente y evita posibles conflictos o bloqueos que podrían surgir al compartir un mismo socket entre múltiples operaciones concurrentes.
+    def register(user):
+        """ Registra un nuevo usuario en el sistema.
+        El protocolo de envío es "REGISTER\0" + nombre\0
+        Recibe un byte: 0 = OK, 1 = nombre en uso, 2 = error."""
+        
         try:
+            # Creamos un socket nuevo para esta operación
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
 
@@ -55,6 +67,11 @@ class client:
 
     @staticmethod
     def unregister(user):
+        """Esta función da de baja a un usuario del sistema.
+        El protocolo de envío es "UNREGISTER\0" + nombre\0
+        Recibe un byte: 0 = OK, 1 = usuario no existe, 2 = error.
+        """
+
         try:
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
@@ -73,45 +90,59 @@ class client:
 
     @staticmethod
     def connect(user):
+        """Esta función conecta al usuario al servidor (cambia a estado conectado).
+        Previamente crea un hilo de escucha y un socket pasivo.
+        El protocolo de envío es "CONNECT\0" + nombre\0 + puerto_de_escucha\0
+        Recibe un byte: 0 = OK, 1 = usuario no existe, 2 = ya conectado, 3 = error.
+        """
+
         try:
-            #Buscamos un puerto libre 
+            # Obtenemos un puerto libre para el hilo de escucha
             tmp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             tmp.bind(('', 0))
             client._listen_port = tmp.getsockname()[1] #Obtenemos el puerto asignado por el SO y lo guardamos para usarlo en la conexión con el servidor. El puerto se asigna dinámicamente al usar 0, lo que permite al sistema operativo elegir un puerto libre automáticamente.
             tmp.close()
 
+            # Configuramos el socket de escucha
             listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Creamos un socket para escuchar las conexiones entrantes del servidor
             listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listen_socket.bind(('', client._listen_port))
             listen_socket.listen(10)
 
-            client._listen_socket = listen_socket #El usuario tiene su propio socket de escucha para recibir mensajes
-            client._listening = True #Está escuchando para recibir mensajes del servidor
-            thr = threading.Thread(target=client.listen_thread, daemon=True) #Creamos un hilo para manejar las conexiones entrantes del servidor de forma concurrente, sin bloquear la ejecución del hilo principal del cliente, que se encarga de leer los comandos del usuario y enviar las solicitudes al servidor. Al usar un hilo separado para escuchar las conexiones entrantes, el cliente puede seguir respondiendo a los comandos del usuario mientras espera mensajes del servidor.
-            thr.start() #El hilo empieza a escuchar las conexiones entrantes del servidor 
-            client._listen_thread = thr #Asignamos el hilo al usuario para poder controlarlo (por ejemplo, para detenerlo al desconectar)
+            # Guardamos el socket de escucha y el estado de escucha para que el hilo de escucha pueda usarlo
+            client._listen_socket = listen_socket 
+            client._listening = True
+            # Creamos el hilo de escucha para recibir mensajes del servidor y de otros clientes. El hilo se ejecuta en segundo plano (daemon=True) para que se cierre automáticamente al salir del programa principal.
+            thr = threading.Thread(target=client.listen_thread, daemon=True) 
+            thr.start() 
+            client._listen_thread = thr
 
-            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Hilo de "connect", distinto del hilo de escucha
+            # Enviamos la petición CONNECT al servidor
+            client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
             client._socket.send(b"CONNECT\0")
             client._socket.send(user.encode('utf-8') + b'\0')
-            client._socket.send(str(client._listen_port).encode('utf-8') + b'\0') # Enviamos el puerto de escucha del cliente al servidor para que el servidor sepa a qué puerto debe enviar los mensajes al cliente. Esto es necesario para que el servidor pueda establecer una conexión con el cliente y enviarle los mensajes entrantes. Al enviar el puerto de escucha del cliente durante la operación CONNECT, el servidor puede mantener un registro de los clientes conectados y sus respectivos puertos de escucha, lo que le permite enrutar correctamente los mensajes a cada cliente.
+            client._socket.send(str(client._listen_port).encode('utf-8') + b'\0')
 
-            res = struct.unpack('B', client._socket.recv(1))[0] #recibimos la respuesta de servidor.
-            #struct = modulo para convertir datos a bytes y viceversa, se usa para interpretar la respuesta del servidor como un byte que indica el resultado de la operación CONNECT (0 para éxito, 1 para usuario no existe, 2 para usuario ya conectado, etc.)
-            #unpack('B', data) interpreta el byte recibido como un entero sin signo (unsigned char) y devuelve una tupla con ese valor. Al usar [0], obtenemos el valor entero directamente.
-            client._socket.close() #se cierra el hilo al terminar la operacion de conexion, el hilo de escucha sigue abierto para recibir mensajes del servidor
+            # Recibimos la respuesta del servidor
+            res = struct.unpack('B', client._socket.recv(1))[0]
+
+            # Cerramos el socket de la operación CONNECT
+            client._socket.close()
             
-            client._cur_user = user # Guardamos el usuario conectado actualmente en una variable para usarlo en otras operaciones (como USERS, SEND, etc.) y para enviarlo al servidor cuando sea necesario (por ejemplo, en la operación USERS para que el servidor sepa quién está solicitando la lista de usuarios conectados). Al guardar el usuario conectado actualmente, el cliente puede mantener un estado interno sobre quién está conectado y usar esa información para interactuar con el servidor de manera más eficiente y personalizada.
+            # Guardamos el usuario conectado actualmente en una variable para usarlo en otras operaciones
+            client._cur_user = user 
             
-            if   res == 0: print("CONNECT OK")
+            # Mostramos un mensaje con el resultado de la operación según el código recibido del servidor
+            if res == 0: print("CONNECT OK")
             elif res == 1: print("CONNECT FAIL, USER DOES NOT EXIST")
             elif res == 2: print("USER ALREADY CONNECTED")
-            else:          print("CONNECT FAIL")
+            else: print("CONNECT FAIL")
 
+            # Si la conexión falló, detenemos el hilo de escucha
             if res != 0:
                 client._listening = False
-                client._listen_socket.close() #se cierra el hilo de escucha si no se ha podido conectar, para evitar que quede escuchando sin necesidad
+                client._listen_socket.close()
 
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         
@@ -121,18 +152,31 @@ class client:
 
     @staticmethod
     def disconnect(user):
+        """ Esta función desconecta al usuario (sin darle de baja).
+        El protocolo de envío es "DISCONNECT\0" + nombre\0
+        Recibe un byte: 0 = OK, 1 = usuario no existe, 2 = no estaba conectado, 3 = error."""
+
         try:
+            # Enviamos la petición DISCONNECT al servidor
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
             client._socket.send(b"DISCONNECT\0")
-            client._socket.send(user.encode('utf-8') + b'\0') # Enviamos el nombre del usuario con encode (para codificarlo a bytes) y b'\0' para indicar el final de la cadena, siguiendo el protocolo definido para las operaciones del cliente-servidor. Esto permite al servidor interpretar correctamente el nombre del usuario que se está desconectando y realizar las acciones necesarias para actualizar su estado y liberar los recursos asociados a ese usuario.
-            client._listening = False #Detenemos el hilo de escucha para que deje de aceptar conexiones entrantes del servidor, ya que el cliente se va a desconectar y no necesita seguir recibiendo mensajes.
+            client._socket.send(user.encode('utf-8') + b'\0')
+            #Detenemos el hilo de escucha para que deje de aceptar conexiones entrantes del servidor
+            client._listening = False 
+
+            # Recibimos la respuesta del servidor sobre la operación DISCONNECT
             res = struct.unpack('B', client._socket.recv(1))[0]
-            if   res == 0: print("DISCONNECT OK")
+            
+            # Mostramos un mensaje con el resultado de la operación según el código recibido del servidor
+            if res == 0: print("DISCONNECT OK")
             elif res == 1: print("DISCONNECT FAIL, USER DOES NOT EXIST")
             elif res == 2: print("DISCONNECT FAIL, USER NOT CONNECTED")
-            else:          print("DISCONNECT FAIL")
-            client._socket.close() #cerramos socket de la operación DISCONNECT, el hilo de escucha ya se ha detenido y cerrado, por lo que no es necesario cerrarlo aquí.
+            else: print("DISCONNECT FAIL")
+
+            # Cerramos socket de la operación DISCONNECT
+            client._socket.close() 
+
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
         except Exception as e:
             print(f"Error en DISCONNECT: {e}")
@@ -140,20 +184,27 @@ class client:
 
     @staticmethod
     def users(verprint=True):
+        """ ESta función solicita al servidor la lista de usuarios conectados.
+        Si verprint es True, muestra la lista por pantalla. Si es False, solo actualiza internamente.
+        EL protocolo de envío es "USERS\0" + nombre_solicitante\0
+        Recibe: 1 byte (0 éxito, 1 solicitante no conectado, 2 error)
+        Si éxito: cadena con número de usuarios ("N\0") y luego N cadenas con formato "nombre :: IP :: puerto".
+        Actualiza el diccionario _connected_users y opcionalmente imprime."""
+
         try:
-            # Enviar operación 4 y nombre (256 bytes)
+            # Enviamos la petición USERS al servidor
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
             client._socket.send(b"USERS\0")
-
             user_name = getattr(client, '_cur_user', "anon")
             client._socket.send(user_name.encode('utf-8') + b'\0')
 
-            # Leer respuesta y contador
+            # Recibimos la respuesta del servidor sobre la operación USERS
             res_raw = client._socket.recv(1)
             if not res_raw: return client.RC.ERROR
             res = struct.unpack('B', res_raw)[0]
 
+            # Si la respuesta es éxito:
             if res == 0:
                 # Leer el número de usuarios (cadena terminada en \0)
                 count_str = b""
@@ -170,24 +221,26 @@ class client:
                 client._connected_users = {}
 
                 for _ in range(count):
-                    data = b"" # Se usa name = b"" para crear un objeto de tipo byte vacío en el que se irán acumulando los bytes recibidos del servidor hasta encontrar el byte de terminación '\0'.
+                    # Leemos cada línea "usuario :: IP :: puerto"
+                    data = b""
                     while True:
-                        c = client._socket.recv(1) # Se lee un byte del socket, que representa un carácter del nombre de usuario. El servidor envía los nombres de usuario como cadenas de bytes terminadas en '\0', por lo que se lee byte a byte hasta encontrar el byte de terminación.
+                        c = client._socket.recv(1) 
                         if c == b'\0' or not c: break
                         data += c
 
                     full_info = data.decode()
-                    # El servidor envía: "usuario :: IP :: puerto"
+                    
+                    # Parseamos la información para extraer el nombre, IP y puerto, y guardarla en el diccionario de usuarios conectados
                     parts = full_info.split("::")
                     if len(parts) == 3:
                         uname = parts[0].strip()
                         uip   = parts[1].strip()
                         uport = int(parts[2].strip())
                         
-                        # GUARDAR en el diccionario para que GETFILE pueda usarlo luego
+                        # Guardamos en el diccionario
                         client._connected_users[uname] = (uip, uport)
                         
-                        # Imprimir solo el nombre (o la info completa según prefieras)
+                        # Imprimimos solo el nombre (o la info completa según prefieras)
                         if verprint:    
                             print(f"  {uname}")
                     else:
@@ -195,12 +248,15 @@ class client:
                         if verprint:
                             print(f"  {full_info}")
 
+            # Si la respuesta es que el solicitante no está conectado, mostramos un mensaje de error específico
             elif res == 1:
                 if verprint:
                     print("CONNECTED USERS FAIL, USER IS NOT CONNECTED")
+            # Si es otro error, mostramos un mensaje general
             else:
                 if verprint:
                     print("CONNECTED USERS FAIL")
+            # Cerramos el socket de la operación USERS
             client._socket.close()
             return client.RC.OK if res == 0 else (client.RC.USER_ERROR if res == 1 else client.RC.ERROR)
             
@@ -211,30 +267,47 @@ class client:
 
     @staticmethod
     def send(user, message):
+        """ Esta función envía un mensaje de texto simple a otro usuario.
+        Normaliza el mensaje usando el servicio web (si está disponible).
+        El protocolo de envio es "SEND\0" + remitente\0 + destinatario\0 + mensaje\0
+        Recibe: 1 byte (0 éxito, 1 destinatario no existe, 2 error)
+        Si éxito: recibe cadena con el ID del mensaje.
+        """
         try:
             # Normalizamos el mensaje usando el servicio web
             ws = client.get_ws_client()
             if ws:
                 message = ws.service.normalizar_mensaje(message)
 
+            # Enviamos la petición SEND al servidor
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
-            client._socket.send(b"SEND\0") #operación 5: SEND
+            client._socket.send(b"SEND\0")
             sender = getattr(client, '_cur_user', "anon")
-            client._socket.send(sender.encode('utf-8') + b'\0')   # remitente
-            client._socket.send(user.encode('utf-8') + b'\0')     # destinatario
-            client._socket.send(message.encode('utf-8') + b'\0')  # mensaje
-            #Se recibe una respuesta del servidor, que es un byte que indica si el envío fue exitoso o no
-            res = struct.unpack('B', client._socket.recv(1))[0] #respuesta del servidor (1 byte)
+            client._socket.send(sender.encode('utf-8') + b'\0')
+            client._socket.send(user.encode('utf-8') + b'\0')
+            client._socket.send(message.encode('utf-8') + b'\0')
+
+            # Recibimos la respuesta del servidor sobre la operación SEND
+            res = struct.unpack('B', client._socket.recv(1))[0]
+            
+            # Si el envío fue exitoso leemos el ID del mensaje y mostramos mensaje de éxito
             if res == 0:
-                id_str = b"" # Si el envío fue exitoso, se lee el ID del mensaje asignado por el servidor, que es una cadena de bytes terminada en '\0'. 
+                id_str = b""
                 while True:
                     c = client._socket.recv(1)
                     if c == b'\0': break
                     id_str += c
-                print(f"SEND OK - MESSAGE {id_str.decode()}") #Se muestra éxito en el envío y el id del mensaje 
+
+                # Mostramos éxito en el envío y el id del mensaje
+                print(f"SEND OK - MESSAGE {id_str.decode()}")  
+            
+            # Si el destinatario no existe, mostramos un mensaje de error específico
             elif res == 1: print("SEND FAIL, USER DOES NOT EXIST")
-            else:          print("SEND FAIL")
+
+            # Si es otro error, mostramos un mensaje general de fallo en el envío
+            else: print("SEND FAIL")
+
             return client.RC.OK if res == 0 else client.RC.ERROR
         except Exception as e:
             print(f"Error en SEND: {e}")
@@ -242,6 +315,10 @@ class client:
 
     @staticmethod
     def sendAttach(user, file, message):
+        """ ESta función envía un mensaje con fichero adjunto.
+        El protocolo de envio es "SENDATTACH\0" + remitente\0 + destinatario\0 + mensaje\0 + nombre_fichero\0
+        Recibe: 1 byte (0 éxito, 1 destinatario no existe, 2 error) y luego ID si éxito.
+        """
         try:
             # Verificamos si el fichero existe
             if not os.path.exists(file):
@@ -253,10 +330,9 @@ class client:
             if ws:
                 message = ws.service.normalizar_mensaje(message)
 
+            # Enviamos la petición SENDATTACH al servidor
             client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client._socket.connect((client._server, client._port))
-            
-            # Enviamos las cabeceras del protocolo
             client._socket.send(b"SENDATTACH\0")
             sender = getattr(client, '_cur_user', "anon")
             client._socket.send(sender.encode('utf-8') + b'\0')
@@ -264,24 +340,32 @@ class client:
             client._socket.send(message.encode('utf-8') + b'\0')
             client._socket.send(file.encode('utf-8') + b'\0')
 
-            # Esperamos la respuesta del servidor (0, 1 o 2)
+            # Esperamos la respuesta del servidor sobre la operación SENDATTACH
             res_raw = client._socket.recv(1)
             if not res_raw:
                 return client.RC.ERROR
                 
             res = struct.unpack('B', res_raw)[0]
             
+            # Si el envío fue exitoso leemos el ID del mensaje y mostramos mensaje de éxito
             if res == 0:
                 id_str = b""
                 while True:
                     c = client._socket.recv(1)
                     if not c or c == b'\0': break
                     id_str += c
+
+                # Mostramos éxito en el envío y el id del mensaje
                 print(f"SENDATTACH OK - MESSAGE {id_str.decode()}")
+                # Cerramos el socket de la operación SENDATTACH
                 client._socket.close()
+
                 return client.RC.OK
+            
+            # Si el destinatario no existe, mostramos un mensaje de error específico
             elif res == 1: 
                 print("SENDATTACH FAIL, USER DOES NOT EXIST")
+            # Si es otro error, mostramos un mensaje general de fallo en el envío
             else:          
                 print("SENDATTACH FAIL")
 
@@ -294,17 +378,22 @@ class client:
     
     @staticmethod
     def getfile(username, remote_filename, local_filename):
+        """ Esta función transfiere un fichero desde otro usuario (P2P) usando la conexión directa.
+        El protocolo de envío consiste en que se conecta a la IP:puerto del otro usuario (obtenido con USERS).
+        Envía: "GET_FILE\0" + nombre_solicitante\0 + nombre_fichero_remoto\0
+        Recibe: 1 byte (0 éxito, 1 error) y luego el contenido del fichero hasta cierre de conexión.
+        """
         try:
-            # Si no tenemos los datos del usuario, llamamos a USERS automáticamente
+            # Si no tenemos los datos del usuario, llamamos a USERS para actualizar la lista de usuarios conectados
             if username not in client._connected_users:
                 client.users(verprint=False)  
             
-            # Si después de llamar a USERS sigue sin estar, es que no está conectado
+            # Si después de llamar a USERS sigue sin estar, es que el usuario no está conectado
             if username not in client._connected_users:
                 print(f"c> FILE TRANSFER FAILED, user not connected.")
                 return client.RC.ERROR
             
-            # Obtener IP y puerto (Corregido para coincidir con la tupla de users())
+            # Obtenemos la IP y puerto
             sender_ip, sender_port = client._connected_users[username]
             
             # Conexión P2P
@@ -315,21 +404,20 @@ class client:
                 print(f"c> FILE TRANSFER FAILED, user not connected.")
                 return client.RC.ERROR
             
-            # Protocolo GETFILE
+            # Enviamos la petición GET_FILE al otro usuario 
             s.send(b"GET_FILE\0")
-            # Enviar el nombre del solicitante
             my_name = getattr(client, '_cur_user', "anon")
             s.send(my_name.encode('utf-8') + b'\0')
             s.send(remote_filename.encode('utf-8') + b'\0')
             
-            # Leer respuesta (0 = OK, 1 = Error)
+            # Leemos la respuesta del otro usuario sobre la operación GET_FILE
             response = s.recv(1)
             if not response or response[0] != 0:
                 print("c> FILE TRANSFER FAILED, user not connected.")
                 s.close()
                 return client.RC.ERROR
             
-            # Recibimos hasta que el otro cierre la conexión
+            # Recibimos el contenido del fichero hasta que el otro cierre la conexión
             received = 0
             try:
                 with open(local_filename, "wb") as f:
@@ -346,13 +434,15 @@ class client:
                     os.remove(local_filename)
                 return client.RC.ERROR
             
+            # Cerramos la conexión P2P
             s.close()
             
-            # Éxito si recibimos algo
+            # Si recibimos algo mostramos mensaje de éxito
             if received > 0:  
                 print("c> GETFILE OK")
                 return client.RC.OK
             else:
+                # En caso contrario, mensaje de error y eliminamos el fichero local si se creó
                 if os.path.exists(local_filename):
                     os.remove(local_filename)
                 print("c> FILE TRANSFER FAILED")
@@ -364,11 +454,15 @@ class client:
 
     @staticmethod
     def listen_thread():
+        """ El hilo de escucha atiende:
+            - Mensajes entrantes del servidor (SEND_MESSAGE, SEND_MESSAGE_ATTACH, ACKs)
+            - Peticiones P2P de ficheros (GET_FILE) """
+
         while client._listening:
             try:
                 connection, _ = client._listen_socket.accept()
                 
-                # Leer la operación (cadena terminada en \0)
+                # Leemos la operación (cadena terminada en \0)
                 op = b""
                 while True:
                     c = connection.recv(1)
@@ -376,7 +470,7 @@ class client:
                     op += c
                 op = op.decode()
 
-                # Mensaje simple)
+                # Mensaje simple
                 if op == "SEND_MESSAGE":
                     sender = b""
                     while True:
@@ -399,7 +493,7 @@ class client:
                     print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()} {message.decode()} END")
                     print("c> ", end="", flush=True)
 
-                # Mensaje con adjunto
+                # Mensaje con fichero adjunto
                 elif op == "SEND_MESSAGE_ATTACH":
                     sender = b""
                     while True:
@@ -428,7 +522,7 @@ class client:
                     print(f"\ns> MESSAGE {msg_id.decode()} FROM {sender.decode()} {message.decode()} END FILE {filename.decode()}")
                     print("c> ", end="", flush=True)
 
-                # Confirmación de entrega de mensaje con adjunto
+                # Confirmación de entrega de mensaje con adjunto (ACK)
                 elif op == "SEND_MESS_ATTACH_ACK":
                     msg_id = b""
                     while True:
@@ -445,7 +539,7 @@ class client:
                     print(f"\ns> SENDATTACH MESSAGE {msg_id.decode()} {filename.decode()} OK")
                     print("c> ", end="", flush=True)
                 
-                # Confirmación de entrega de mensaje simple
+                # Confirmación de entrega de mensaje simple (ACK)
                 elif op == "SEND_MESS_ACK":
                     msg_id = b""
                     while True:
@@ -455,17 +549,17 @@ class client:
                     print(f"\ns> SEND MESSAGE {msg_id.decode()} OK")
                     print("c> ", end="", flush=True)
 
-                # Transferencia P2P
+                # Petición P2P de fichero
                 elif op == "GET_FILE":
 
-                    # Leer nombre del solicitante
+                    # Leemos nombre del solicitante
                     requester = b""
                     while True:
                         c = connection.recv(1)
                         if not c or c == b'\0': break
                         requester += c
 
-                    # Leer nombre del fichero
+                    # Leemos nombre del fichero solicitado
                     filename_b = b""
                     while True:
                         c = connection.recv(1)
@@ -473,7 +567,7 @@ class client:
                         filename_b += c
                     filename = filename_b.decode()
 
-                    # Verificar existencia
+                    # Verificamos su existencia y enviamos el contenido
                     if os.path.exists(filename):
                         connection.send(bytes([0]))
                         with open(filename, 'rb') as f:
@@ -482,7 +576,7 @@ class client:
                                 if not data: break
                                 connection.sendall(data)
                     else:
-                        connection.send(bytes([1])) # Código 1 = Error/No existe
+                        connection.send(bytes([1])) # 1 = error (fichero no existe)
                 
                 connection.close()
 
@@ -493,17 +587,22 @@ class client:
 
     @staticmethod
     def shell():
-        while True:
-            try: #Primero asignamos a command "c>" para que se muestre siempre antres del input, luego le hacemos el split para separar el comando y sus argumentos, y luego procesamos cada comando según su formato esperado. Si el formato no es correcto, se muestra un mensaje de uso para ese comando específico.
-                command = input("c> ")
-                line = command.split(" ")
-                if not line: #Si no se ha introducido ningún comando, se vuelve a mostrar el prompt sin hacer nada
-                    continue
-                line[0] = line[0].upper() #Convertimos el comando a mayúsculas para que no sea sensible a mayúsculas/minúsculas, es decir, que se pueda escribir "register", "REGISTER", "Register", etc. y se reconozca como el mismo comando.
+        """ Bucle principal que lee comandos del usuario y ejecuta las funciones correspondientes.
+        Los comandos disponibles: REGISTER, UNREGISTER, CONNECT, DISCONNECT, USERS, SEND, SENDATTACH, GETFILE, QUIT. """
 
+        while True:
+            try:
+                #Primero asignamos a command "c>" para que se muestre siempre antres del input
+                command = input("c> ")
+                line = command.split(" ") # le hacemos el split para separar el comando y sus argumentos,
+                if not line: 
+                    continue
+                #Convertimos el comando a mayúsculas para que no sea sensible a mayúsculas/minúsculas
+                line[0] = line[0].upper() 
+                
+                # Ahora procesamos cada comando según su formato esperado
                 if line[0] == "REGISTER": 
-                    if len(line) == 2: client.register(line[1]) # Comando register tiene que tener 2 argumentos y tras verificarlo se llama a la función register con el nombre de usuario (line[1]) como argumento. 
-                    # Si el número de argumentos no es correcto, se muestra un mensaje de uso para ese comando específico.
+                    if len(line) == 2: client.register(line[1]) 
                     else: print("Uso: REGISTER <usuario>")
 
                 elif line[0] == "UNREGISTER":
@@ -520,32 +619,29 @@ class client:
 
                 elif line[0] == "USERS":
                     if len(line) == 1: 
-                        client.users() # Llama a la función si solo escribes USERS
+                        client.users()
                     else: print("Uso: USERS ")
 
                 elif line[0] == "SEND":
                     if len(line) >= 3:
-                        client.send(line[1], ' '.join(line[2:])) #Longitud igual o mayor a 3 (hay espacios) se imprime el nombre del destinatario (line[1]) y el mensaje (que se obtiene uniendo con espacios los argumentos a partir de line[2] hasta el final de la línea, usando ' '.join(line[2:])) 
-                        #y se llama a la función send con esos argumentos. Esto permite enviar mensajes que contienen espacios sin que se interpreten como argumentos separados.
+                        client.send(line[1], ' '.join(line[2:])) 
                     else: print("Uso: SEND <usuario> <mensaje>")
 
                 elif line[0] == "SENDATTACH":
                     if len(line) >= 4:
-                        #Guardamos los campos para emplearlos luego en el getfile
                         dest     = line[1]
                         filename = line[2]
                         message  = ' '.join(line[3:])
-                        client.sendAttach(dest, filename, message) #4 aurgumentos o mas, la operacion, el usuario el fichero y el mensaje, se llama a la función sendAttach con esos argumentos. El mensaje se obtiene uniendo con espacios los argumentos a partir de line[3] hasta el final de la línea, usando ' '.join(line[3:]), para permitir mensajes con espacios.
+                        client.sendAttach(dest, filename, message)
                     else: print("Uso: SENDATTACH <usuario> <fichero> <mensaje>")
                 
                 elif line[0] == "GETFILE":
-                    # GETFILE <usuario> <fichero_remoto> <fichero_local>
                     if len(line) == 4:
                         client.getfile(line[1], line[2], line[3])
                     else:
                         print("Uso: GETFILE <usuario> <fichero_remoto> <fichero_local>")
 
-                elif line[0] == "QUIT": # solo quit sin argumentos, para salir del cliente
+                elif line[0] == "QUIT":
                     if len(line) == 1: break
                     else: print("Uso: QUIT")
 
@@ -561,6 +657,7 @@ class client:
 
     @staticmethod
     def parseArguments(argv):
+        """Esta función procesa los argumentos de línea de comandos."""
         parser = argparse.ArgumentParser()
         parser.add_argument('-s', type=str, required=True, help='IP del servidor')
         parser.add_argument('-p', type=int, required=True, help='Puerto del servidor')
