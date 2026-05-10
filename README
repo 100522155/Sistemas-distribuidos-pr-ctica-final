@@ -1,0 +1,95 @@
+PRÁCTICA FINAL SISTEMAS DISTRIBUIDOS
+
+Autores: 
+  - NIA1: 100522236, Lidia Valera López, 100522236@alumnos.uc3m.es
+  - NIA2: 100522155, Ana Díaz Jiménez, 100522155@alumnos.uc3m.es
+
+---------------------------------------------------
+1. ESTRUCTURA DEL PROYECTO
+---------------------------------------------------
+
+El proyecto contiene los siguientes archivos:
+
+- client.py                : Cliente en Python 
+- servidor.c               : Servidor principal en C 
+- claves.c / claves.h      : Lógica de operaciones y estructuras de datos
+- log_rpc.x                : Definición de la interfaz RPC
+- log_rpc_server.c         : Servidor RPC que imprime logs
+- log_rpc.h, *_clnt.c, *_svc.c, *_xdr.c : Generados por rpcgen
+- ws_server.py             : Servicio web SOAP para normalizar mensajes
+- Makefile                 : Compilación de todos los binarios C
+- README                   : Este fichero
+
+---------------------------------------------------
+2. COMPILACIÓN
+---------------------------------------------------
+
+**Requisitos previos:** 
+  - gcc, make, librpc-dev (libtirpc-dev)
+  - python3, zeep, spyne (pip install zeep spyne)
+  - Entorno Linux (aulas o contenedor Docker)
+
+**Pasos:**
+1. Abrir una terminal en el directorio del proyecto.
+2. Ejecutar:
+     make clean
+     make
+
+   Esto generará dos ejecutables:
+     - servidor           (servidor de mensajería)
+     - log_rpc_server     (servidor RPC de logs)
+
+3. Los ficheros Python no necesitan compilación.
+
+---------------------------------------------------
+3. EJECUCIÓN DE TODOS LOS PROCESOS
+---------------------------------------------------
+
+En terminales distintas ejecutar:
+
+### 3.1. Servicio web (normalización de mensajes)
+   $ python3 ws_server.py
+   Debe mostrar: "Servidor Web de Normalización escuchando en http://127.0.0.1:8000"
+
+### 3.2. Servidor RPC (logs)
+   $ ./log_rpc_server
+   Se queda a la espera (sin salida hasta que reciba peticiones).
+
+### 3.3. Servidor de mensajería (con variable de entorno)
+   $ export LOG_RPC_IP=127.0.0.1
+   $ ./servidor 8888
+   (El puerto 8888 puede cambiarse a cualquier número > 1024)
+
+### 3.4. Clientes (uno por terminal)
+   $ python3 client.py -s 127.0.0.1 -p 8888
+   Una vez iniciado, el cliente muestra el prompt 'c>' y acepta los comandos.
+
+---------------------------------------------------
+4. USO DE LOS CLIENTES (COMANDOS)
+---------------------------------------------------
+
+Todos los comandos no distinguen mayúsculas/minúsculas.
+
+- REGISTER <usuario>          : Registrar un nuevo usuario
+- CONNECT <usuario>           : Conectar al usuario (crea hilo de escucha)
+- USERS                       : Listar usuarios conectados (con IP y puerto)
+- SEND <usuario> <mensaje>    : Enviar mensaje de texto
+- SENDATTACH <usuario> <fichero> <mensaje> : Enviar mensaje con adjunto
+- GETFILE <usuario> <remoto> <local> : Descargar fichero desde otro usuario (P2P)
+- DISCONNECT <usuario>        : Desconectar (sigue registrado)
+- UNREGISTER <usuario>        : Dar de baja al usuario (borra cuenta y mensajes)
+- QUIT                        : Salir del cliente (desconecta sin borrar cuenta)
+
+
+---------------------------------------------------
+5. DETENCIÓN DE PROCESOS
+---------------------------------------------------
+
+- Servidor C y servidor RPC: pulsar Ctrl+C
+- Cliente: comando QUIT o Ctrl+C
+- Servicio web: Ctrl+C
+
+
+Para cualquier duda, consultar la memoria (memoria.pdf).
+
+===================================================
